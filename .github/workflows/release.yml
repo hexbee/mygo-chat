@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -28,15 +28,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS, os: macos-latest, platform: "darwin/arm64,darwin/amd64" }
-          - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
-          - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
+          - { name: macOS, os: macos-latest, platform: 'darwin/arm64,darwin/amd64' }
+          - { name: Windows, os: ubuntu-latest, platform: 'windows/amd64,windows/arm64' }
+          - { name: Linux, os: ubuntu-latest, platform: 'linux/amd64,linux/arm64' }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - uses: pnpm/action-setup@v4
+        with:
+          version: 12
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -46,7 +48,7 @@ jobs:
         if: matrix.name == 'Windows' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y nsis
       - name: Build applications
-        run: pnpm run build -- -platform "${{ matrix.platform }}"
+        run: pnpm exec mygo build -platform "${{ matrix.platform }}"
       - name: Upload assets to release
         env:
           GH_TOKEN: ${{ github.token }}
