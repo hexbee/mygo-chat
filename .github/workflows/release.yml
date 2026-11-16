@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -28,9 +28,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS, os: macos-latest, platform: 'darwin/arm64,darwin/amd64' }
-          - { name: Windows, os: ubuntu-latest, platform: 'windows/amd64,windows/arm64' }
-          - { name: Linux, os: ubuntu-latest, platform: 'linux/amd64,linux/arm64' }
+          - { name: macOS, os: macos-latest, platform: "darwin/arm64,darwin/amd64" }
+          - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
+          - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -45,7 +45,23 @@ jobs:
       - name: Install NSIS for Windows installer
         if: matrix.name == 'Windows' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y nsis
-      - name: Build and upload
+      - name: Build applications
+        run: pnpm run build -- -platform "${{ matrix.platform }}"
+      - name: Upload assets to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: pnpm run build -- -platform "${{ matrix.platform }}" -upload
+        run: |
+          find build -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" \) | while read -r file; do
+            echo "Uploading $file..."
+            gh release upload "$GITHUB_REF_NAME" "$file" --repo "$GITHUB_REPOSITORY" --clobber
+          done
+
+  publish-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
