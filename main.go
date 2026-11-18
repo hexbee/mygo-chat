@@ -10,7 +10,7 @@ import (
 	"github.com/egoist/mygo"
 )
 
-const CurrentAppVersion = "0.1.3"
+const CurrentAppVersion = "0.1.4"
 
 // AppService provides basic desktop metadata and native bridge
 type AppService struct{}

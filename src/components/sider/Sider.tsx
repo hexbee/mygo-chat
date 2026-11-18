@@ -13,6 +13,7 @@ import { showToast } from '../base/toastState.js'
 import { openSettings } from '../settings/settingsDialogState.js'
 import { DesktopUpdateIndicator } from '../updater/DesktopUpdateIndicator.js'
 import { useUpdateStore } from '../../services/updater/updateStore.js'
+import { modKey } from '../../app/shortcuts.js'
 import { closeMobileSider, useMobileSider } from './mobileSiderState.js'
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
@@ -63,7 +64,7 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
         <IconButton
           size="m"
           icon={<IconPanelLeftOutline16 />}
-          tooltip={t('collapseSiderbarButton')}
+          tooltip={`${t('collapseSiderbarButton')} (${modKey}B)`}
           tooltipPlacement="bottom"
           onClick={() => (mobile ? closeMobileSider() : setSiderCollapsed(true))}
         />
@@ -71,6 +72,7 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
       <button
         type="button"
         className={styles.newChat}
+        title={`${t('newChat')} (${modKey}N)`}
         onClick={() => {
           newChat()
           closeMobileSider()
@@ -99,7 +101,12 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
         </div>
       </div>
       <div className={styles.bottom}>
-        <button type="button" className={styles.settings} onClick={() => openSettings('general')}>
+        <button
+          type="button"
+          className={styles.settings}
+          title={`${t('settings')} (${modKey},)`}
+          onClick={() => openSettings('general')}
+        >
           <span className={styles.settingsIcon}>
             <IconSettingsOutline16 />
           </span>

@@ -4,6 +4,7 @@ import { setSiderCollapsed } from '../../services/settings.js'
 import { newChat } from '../../services/chat/store.js'
 import { IconButton } from '../base/IconButton.js'
 import { DesktopUpdateBadge } from '../updater/DesktopUpdateIndicator.js'
+import { modKey } from '../../app/shortcuts.js'
 import styles from './Sider.module.css'
 
 /** 收起后左上角的按钮组 */
@@ -17,7 +18,7 @@ export const CollapsedSider = () => {
             size="m"
             tone="primary"
             icon={<IconPanelLeftOutline16 />}
-            tooltip={t('expandSiderbarButton')}
+            tooltip={`${t('expandSiderbarButton')} (${modKey}B)`}
             onClick={() => setSiderCollapsed(false)}
           />
           <DesktopUpdateBadge />
@@ -26,7 +27,7 @@ export const CollapsedSider = () => {
           size="m"
           tone="primary"
           icon={<NewChatIcon />}
-          tooltip={t('newChat')}
+          tooltip={`${t('newChat')} (${modKey}N)`}
           onClick={newChat}
         />
       </div>
