@@ -25,7 +25,7 @@ func (AppService) GetAppInfo() AppInfo {
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
 		GoVersion: runtime.Version(),
-		Version:   "0.1.1",
+		Version:   "0.1.2",
 	}
 }
 
