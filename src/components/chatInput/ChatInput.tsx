@@ -56,6 +56,26 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
+  const historyIndexRef = useRef<number>(-1)
+  const savedDraftRef = useRef<string>('')
+
+  const getUserMessagesHistory = useCallback((): string[] => {
+    if (!sessionId) {
+      return []
+    }
+    const session = useChatStore.getState().sessionCache[sessionId]
+    if (!session || !session.messages) {
+      return []
+    }
+    const userMsgs: string[] = []
+    for (let i = session.messages.length - 1; i >= 0; i--) {
+      const m = session.messages[i]
+      if (m.role === 'user' && m.content?.trim()) {
+        userMsgs.push(m.content)
+      }
+    }
+    return userMsgs
+  }, [sessionId])
 
   useLayoutEffect(() => {
     const toggles = togglesRef.current
@@ -172,7 +192,10 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           autoFocus={!isMobile}
           disabled={importingHistory}
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            historyIndexRef.current = -1
+            setText(event.target.value)
+          }}
           onMouseDown={(event) => {
             // 首次点击时手动聚焦，避免 Safari 把整个页面滚到输入框位置。
             if (isMobile && event.button === 0 && document.activeElement !== event.currentTarget) {
@@ -183,7 +206,73 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault()
+              historyIndexRef.current = -1
               send()
+              return
+            }
+
+            // 按方向键 ↑ 快速调出上一条发送的消息进行重新编辑或重发
+            if (
+              event.key === 'ArrowUp' &&
+              !event.shiftKey &&
+              !event.altKey &&
+              !event.metaKey &&
+              !event.ctrlKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              const textarea = event.currentTarget
+              const isAtStart = textarea.selectionStart === 0 && textarea.selectionEnd === 0
+              if (isAtStart || !text) {
+                const history = getUserMessagesHistory()
+                if (history.length > 0) {
+                  const nextIndex = historyIndexRef.current + 1
+                  if (nextIndex < history.length) {
+                    event.preventDefault()
+                    if (historyIndexRef.current === -1) {
+                      savedDraftRef.current = text
+                    }
+                    historyIndexRef.current = nextIndex
+                    const newText = history[nextIndex]
+                    setText(newText)
+                    requestAnimationFrame(() => {
+                      if (textareaRef.current) {
+                        textareaRef.current.selectionStart = newText.length
+                        textareaRef.current.selectionEnd = newText.length
+                      }
+                    })
+                  }
+                }
+              }
+              return
+            }
+
+            // 按方向键 ↓ 切换回更新的消息或之前未发送的草稿
+            if (
+              event.key === 'ArrowDown' &&
+              !event.shiftKey &&
+              !event.altKey &&
+              !event.metaKey &&
+              !event.ctrlKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              const textarea = event.currentTarget
+              const isAtEnd =
+                textarea.selectionStart === text.length && textarea.selectionEnd === text.length
+              if ((isAtEnd || !text) && historyIndexRef.current >= 0) {
+                event.preventDefault()
+                const history = getUserMessagesHistory()
+                const nextIndex = historyIndexRef.current - 1
+                historyIndexRef.current = nextIndex
+                const newText = nextIndex === -1 ? savedDraftRef.current : history[nextIndex]
+                setText(newText)
+                requestAnimationFrame(() => {
+                  if (textareaRef.current) {
+                    textareaRef.current.selectionStart = newText.length
+                    textareaRef.current.selectionEnd = newText.length
+                  }
+                })
+              }
+              return
             }
           }}
           onPaste={(event) => {

@@ -4,7 +4,7 @@ export default defineConfig({
   name: 'DeepSeek Chat',
   slug: 'deepseek-chat',
   identifier: 'com.deepseek.chat',
-  version: '0.1.5',
+  version: '0.1.6',
   copyright: '© 2026 DeepSeek Chat',
 
   devUrl: 'http://localhost:8090',
