@@ -46,12 +46,14 @@ jobs:
         if: matrix.name == 'Windows' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y nsis
       - name: Build applications
+        env:
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
         run: pnpm exec mygo build -platform "${{ matrix.platform }}"
       - name: Upload assets to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          find build -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" \) | while read -r file; do
+          find build -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "*.json" \) | while read -r file; do
             echo "Uploading $file..."
             gh release upload "$GITHUB_REF_NAME" "$file" --repo "$GITHUB_REPOSITORY" --clobber
           done

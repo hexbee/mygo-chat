@@ -10,6 +10,8 @@ import (
 	"github.com/egoist/mygo"
 )
 
+const CurrentAppVersion = "0.1.3"
+
 // AppService provides basic desktop metadata and native bridge
 type AppService struct{}
 
@@ -25,7 +27,7 @@ func (AppService) GetAppInfo() AppInfo {
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
 		GoVersion: runtime.Version(),
-		Version:   "0.1.2",
+		Version:   CurrentAppVersion,
 	}
 }
 
@@ -84,6 +86,7 @@ func (FileService) OpenFile() (*FileOpenResult, error) {
 func main() {
 	mygo.Bind(AppService{})
 	mygo.Bind(FileService{})
+	mygo.Bind(globalUpdateService)
 
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{

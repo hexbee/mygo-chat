@@ -17,6 +17,20 @@ export interface FileOpenResult {
   content: string;
 }
 
+/** UpdateState reflects the current update status, replicating deepseek-harness update phases */
+export interface UpdateState {
+  /** "idle" | "checking" | "available" | "downloading" | "verifying" | "ready" | "error" */
+  phase: string;
+  /** Latest version string */
+  version: string;
+  /** Download progress (0-100) */
+  percent: number;
+  /** Release notes */
+  notes: string;
+  /** Localized or technical error message */
+  error: string;
+}
+
 // ---- Services ----
 
 /** AppService provides basic desktop metadata and native bridge */
@@ -35,5 +49,27 @@ export const FileService = {
   /** SaveFile prompts the user with a native Save dialog and writes the base64 content */
   saveFile(defaultName: string, contentBase64: string): Promise<boolean> {
     return call("FileService.SaveFile", defaultName, contentBase64);
+  },
+} as const;
+
+export const UpdateService = {
+  /** CheckUpdate checks whether a newer version is available. */
+  checkUpdate(): Promise<UpdateState> {
+    return call("UpdateService.CheckUpdate");
+  },
+  /** DismissUpdate closes the update alert/state */
+  dismissUpdate(): Promise<boolean> {
+    return call("UpdateService.DismissUpdate");
+  },
+  getUpdateStatus(): Promise<UpdateState> {
+    return call("UpdateService.GetUpdateStatus");
+  },
+  /** Relaunch restarts the application to apply the downloaded update */
+  relaunch(): Promise<boolean> {
+    return call("UpdateService.Relaunch");
+  },
+  /** StartDownload begins downloading the update payload with progress */
+  startDownload(): Promise<UpdateState> {
+    return call("UpdateService.StartDownload");
   },
 } as const;

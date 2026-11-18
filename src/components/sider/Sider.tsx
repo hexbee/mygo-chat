@@ -11,6 +11,8 @@ import { IconButton } from '../base/IconButton.js'
 import { Modal } from '../base/Modal.js'
 import { showToast } from '../base/toastState.js'
 import { openSettings } from '../settings/settingsDialogState.js'
+import { DesktopUpdateIndicator } from '../updater/DesktopUpdateIndicator.js'
+import { useUpdateStore } from '../../services/updater/updateStore.js'
 import { closeMobileSider, useMobileSider } from './mobileSiderState.js'
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
@@ -47,6 +49,11 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('focus', refresh)
     }
+  }, [])
+
+  useEffect(() => {
+    // 启动时后台静默检查更新
+    useUpdateStore.getState().checkUpdate().catch(() => {})
   }, [])
 
   return (
@@ -98,6 +105,7 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
           </span>
           <span className={styles.settingsLabel}>{t('settings')}</span>
         </button>
+        <DesktopUpdateIndicator />
       </div>
       {deleting ? (
         <Modal

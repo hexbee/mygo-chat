@@ -1,0 +1,85 @@
+.indicator {
+  display: inline-grid;
+  grid-template-columns: 14px max-content;
+  align-items: center;
+  column-gap: 4px;
+  flex: none;
+  height: 28px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 20%, transparent);
+  border-radius: 8px;
+  color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, transparent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.indicator:hover {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 30%, transparent);
+}
+
+.indicator:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 40%, transparent);
+}
+
+.indicator[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.progress {
+  min-inline-size: calc(3ch + 1em);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+
+.badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+  pointer-events: none;
+}
+
+.errorDot {
+  background: var(--dsw-alias-state-error-primary);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}

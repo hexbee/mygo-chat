@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   IconDarkOutline16,
   IconDataOutline16,
@@ -35,6 +35,8 @@ import { showToast } from '../base/toastState.js'
 import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import { nativeOpenFile, nativeSaveFile } from '../../services/desktop/dialog.js'
+import { AppService } from '../../mygo.js'
+import { useUpdateStore } from '../../services/updater/updateStore.js'
 import styles from './Settings.module.css'
 
 /**
@@ -101,6 +103,7 @@ const SettingsContent = () => {
               <LocaleSetting />
               <TtsVoiceSetting />
               <LocationSetting />
+              <UpdateSetting />
             </>
           ) : (
             <>
@@ -391,6 +394,56 @@ const ThemeSetting = () => {
         ))}
       </div>
     </div>
+  )
+}
+
+const UpdateSetting = () => {
+  const t = useTranslate()
+  const { busy, checkUpdate, openDialog } = useUpdateStore()
+  const [checking, setChecking] = useState(false)
+  const [version, setVersion] = useState('v0.1.2')
+
+  useEffect(() => {
+    AppService.getAppInfo()
+      .then((info) => {
+        if (info?.version) setVersion(`v${info.version}`)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleCheck = async () => {
+    setChecking(true)
+    try {
+      const res = await checkUpdate()
+      if (res.phase === 'available' || res.phase === 'ready') {
+        openDialog()
+      } else if (res.phase === 'idle') {
+        showToast(t('desktopUpdateUpToDate'))
+      }
+    } catch {
+      showToast(t('desktopUpdateCheckFailed'))
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  return (
+    <SettingCell
+      label={t('desktopUpdateTitle')}
+      description={version}
+      status={null}
+      action={
+        <Button
+          variant="outlined"
+          size="m"
+          className={styles.cellButton}
+          disabled={busy || checking}
+          onClick={() => void handleCheck()}
+        >
+          {checking ? t('desktopUpdateChecking') : t('desktopUpdateTitle')}
+        </Button>
+      }
+    />
   )
 }
 

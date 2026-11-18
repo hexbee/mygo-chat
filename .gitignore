@@ -10,3 +10,4 @@ build/
 .env.*
 !.env.example
 tmp/
+mygo-update.key

@@ -4,7 +4,7 @@ export default defineConfig({
   name: 'DeepSeek Chat',
   slug: 'deepseek-chat',
   identifier: 'com.deepseek.chat',
-  version: '0.1.2',
+  version: '0.1.3',
   copyright: '© 2026 DeepSeek Chat',
 
   devUrl: 'http://localhost:8090',
@@ -13,6 +13,11 @@ export default defineConfig({
   frontendDist: 'dist',
   bindings: 'src/mygo.ts',
   out: 'build',
+
+  updates: {
+    publicKey: '9H5AdBh2JG1llhMVTMWcPKbWYdgfDiRKRqkYuQfIDOk=',
+    github: 'hexbee/mygo-chat',
+  },
 
   macos: {
     minimumSystemVersion: '12.0',
