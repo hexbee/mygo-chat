@@ -6,11 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/egoist/mygo"
 )
 
-const CurrentAppVersion = "0.1.4"
+const CurrentAppVersion = "0.1.5"
 
 // AppService provides basic desktop metadata and native bridge
 type AppService struct{}
@@ -83,13 +84,112 @@ func (FileService) OpenFile() (*FileOpenResult, error) {
 	}, nil
 }
 
+func setupMenu(win *mygo.Window) {
+	isZh := strings.HasPrefix(strings.ToLower(os.Getenv("LANG")), "zh")
+
+	checkUpdateLabel := "Check for Updates..."
+	preferencesLabel := "Preferences..."
+	fileLabel := "File"
+	newChatLabel := "New Chat"
+	viewLabel := "View"
+	toggleSidebarLabel := "Toggle Sidebar"
+
+	if isZh {
+		checkUpdateLabel = "检查更新..."
+		preferencesLabel = "偏好设置..."
+		fileLabel = "文件"
+		newChatLabel = "新建对话"
+		viewLabel = "视图"
+		toggleSidebarLabel = "切换侧边栏"
+	}
+
+	menu := mygo.NewMenu([]*mygo.MenuItem{
+		{
+			Role: mygo.RoleAppMenu,
+			Submenu: []*mygo.MenuItem{
+				{Role: mygo.RoleAbout},
+				{
+					Label: checkUpdateLabel,
+					Click: func(item *mygo.MenuItem, w *mygo.Window) {
+						if win != nil && win.Page() != nil {
+							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:check-update'))")
+						}
+					},
+				},
+				mygo.Separator(),
+				{
+					Label:       preferencesLabel,
+					Accelerator: "CmdOrCtrl+,",
+					Click: func(item *mygo.MenuItem, w *mygo.Window) {
+						if win != nil && win.Page() != nil {
+							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:open-settings'))")
+						}
+					},
+				},
+				mygo.Separator(),
+				{Role: mygo.RoleServices},
+				mygo.Separator(),
+				{Role: mygo.RoleHide},
+				{Role: mygo.RoleHideOthers},
+				{Role: mygo.RoleUnhide},
+				mygo.Separator(),
+				{Role: mygo.RoleQuit},
+			},
+		},
+		{
+			Label: fileLabel,
+			Submenu: []*mygo.MenuItem{
+				{
+					Label:       newChatLabel,
+					Accelerator: "CmdOrCtrl+N",
+					Click: func(item *mygo.MenuItem, w *mygo.Window) {
+						if win != nil && win.Page() != nil {
+							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:new-chat'))")
+						}
+					},
+				},
+				mygo.Separator(),
+				{Role: mygo.RoleClose},
+			},
+		},
+		{Role: mygo.RoleEditMenu},
+		{
+			Label: viewLabel,
+			Submenu: []*mygo.MenuItem{
+				{
+					Label:       toggleSidebarLabel,
+					Accelerator: "CmdOrCtrl+B",
+					Click: func(item *mygo.MenuItem, w *mygo.Window) {
+						if win != nil && win.Page() != nil {
+							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:toggle-sidebar'))")
+						}
+					},
+				},
+				mygo.Separator(),
+				{Role: mygo.RoleReload},
+				{Role: mygo.RoleForceReload},
+				{Role: mygo.RoleToggleDevTools},
+				mygo.Separator(),
+				{Role: mygo.RoleResetZoom},
+				{Role: mygo.RoleZoomIn},
+				{Role: mygo.RoleZoomOut},
+				mygo.Separator(),
+				{Role: mygo.RoleToggleFullScreen},
+			},
+		},
+		{Role: mygo.RoleWindowMenu},
+	})
+
+	mygo.App.SetMenu(menu)
+}
+
 func main() {
 	mygo.Bind(AppService{})
 	mygo.Bind(FileService{})
 	mygo.Bind(globalUpdateService)
 
 	mygo.App.WhenReady(func() {
-		mygo.NewWindow(mygo.WindowOptions{
+		win := mygo.NewWindow(mygo.WindowOptions{
 			Title:           "DeepSeek Chat",
 			Width:           1160,
 			Height:          840,
@@ -100,6 +200,7 @@ func main() {
 			StateKey:        "main_window",
 			URL:             "/",
 		})
+		setupMenu(win)
 	})
 
 	if err := mygo.App.Run(); err != nil {

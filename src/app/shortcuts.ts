@@ -6,6 +6,8 @@ import {
   openSettings,
   useSettingsDialog,
 } from '../components/settings/settingsDialogState.js'
+import { useUpdateStore } from '../services/updater/updateStore.js'
+import { showToast } from '../components/base/toastState.js'
 
 export const isMac =
   typeof navigator !== 'undefined' &&
@@ -56,9 +58,46 @@ export const useGlobalShortcuts = () => {
       }
     }
 
+    const onNewChat = () => newChat()
+    const onOpenSettings = () => {
+      if (useSettingsDialog.getState().open) {
+        closeSettings()
+      } else {
+        openSettings('general')
+      }
+    }
+    const onToggleSidebar = () => {
+      const current = useSettings.getState().siderCollapsed
+      setSiderCollapsed(!current)
+    }
+    const onCheckUpdate = () => {
+      useUpdateStore
+        .getState()
+        .checkUpdate()
+        .then((res) => {
+          if (res.phase === 'available' || res.phase === 'ready') {
+            useUpdateStore.getState().openDialog()
+          } else if (res.phase === 'idle') {
+            showToast('当前已是最新版本')
+          }
+        })
+        .catch(() => {
+          showToast('检查更新失败')
+        })
+    }
+
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('mygo:new-chat', onNewChat)
+    window.addEventListener('mygo:open-settings', onOpenSettings)
+    window.addEventListener('mygo:toggle-sidebar', onToggleSidebar)
+    window.addEventListener('mygo:check-update', onCheckUpdate)
+
     return () => {
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('mygo:new-chat', onNewChat)
+      window.removeEventListener('mygo:open-settings', onOpenSettings)
+      window.removeEventListener('mygo:toggle-sidebar', onToggleSidebar)
+      window.removeEventListener('mygo:check-update', onCheckUpdate)
     }
   }, [])
 }
