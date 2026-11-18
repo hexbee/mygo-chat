@@ -5,7 +5,7 @@
   box-sizing: border-box;
   width: 261px;
   height: 100%;
-  padding: calc(6px + var(--mygo-titlebar-controls-bottom, 0px)) 12px 0;
+  padding: 0 12px 0;
   border-right: 1px solid var(--dsw-alias-border-l1);
   background-color: var(--dsw-specific-sidebar-fill);
 }
@@ -16,9 +16,9 @@
   justify-content: space-between;
   gap: 8px;
   box-sizing: border-box;
-  height: 48px;
+  height: calc(48px + 6px + var(--mygo-titlebar-controls-bottom, 0px));
   margin-bottom: 16px;
-  padding: 15px 0 10px 4px;
+  padding: calc(15px + 6px + var(--mygo-titlebar-controls-bottom, 0px)) 0 10px 4px;
   flex-shrink: 0;
   -webkit-app-region: drag;
   --app-region: drag;
@@ -40,6 +40,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--dsw-alias-brand-primary);
+  user-select: none;
 }
 
 .newChat {

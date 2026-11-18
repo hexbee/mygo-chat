@@ -18,8 +18,7 @@
 }
 
 .header button,
-.header a,
-.title {
+.header a {
   -webkit-app-region: no-drag;
   --app-region: no-drag;
 }
