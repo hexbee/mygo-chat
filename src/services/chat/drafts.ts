@@ -9,7 +9,7 @@ import {
   validateFiles,
   type UploadTask,
 } from '../attachments.js'
-import type { FileAttachment } from './types.js'
+import type { FileAttachment, UserMessageSegment } from './types.js'
 
 export type DraftAttachment = {
   /** 本地标识，也是 IndexedDB 原件与上传任务的 key */
@@ -19,13 +19,56 @@ export type DraftAttachment = {
   previewUrl: string | null
 }
 
-type Draft = { text: string; attachments: DraftAttachment[] }
+export type DraftSegment =
+  | { type: 'text'; text: string }
+  | { type: 'quote'; id: string; text: string }
 
-export const EMPTY_DRAFT: Draft = { text: '', attachments: [] }
+export type Draft = {
+  text: string
+  segments: DraftSegment[]
+  attachments: DraftAttachment[]
+}
+
+export type PendingQuote = {
+  seq: number
+  sessionId: string | null
+  text: string
+}
+
+export const EMPTY_DRAFT: Draft = { text: '', segments: [], attachments: [] }
+
+let quoteSeq = 0
+
+/** 将富文本草稿片段序列化为发送给模型的纯文本 */
+export const serializeDraftSegments = (segments: DraftSegment[]): string => {
+  let result = ''
+  for (const segment of segments) {
+    if (segment.type === 'text') {
+      result += segment.text
+      continue
+    }
+    const quoted = segment.text.trim()
+    if (!quoted) {
+      continue
+    }
+    if (result && !/\s$/.test(result)) {
+      result += ' '
+    }
+    result += `“${quoted}”`
+  }
+  return result
+}
+
+const segmentsFromText = (text: string): DraftSegment[] =>
+  text ? [{ type: 'text', text }] : []
 
 /** 草稿只保存在本次页面的内存中，独立于会话详情缓存；null 是新对话的草稿。 */
-export const useDrafts = create<{ drafts: Map<string | null, Draft> }>(() => ({
+export const useDrafts = create<{
+  drafts: Map<string | null, Draft>
+  pendingQuote: PendingQuote | null
+}>(() => ({
   drafts: new Map(),
+  pendingQuote: null,
 }))
 
 export const getDraft = (sessionId: string | null): Draft =>
@@ -35,7 +78,7 @@ const updateDraft = (sessionId: string | null, update: (draft: Draft) => Draft) 
   useDrafts.setState((state) => {
     const draft = update(state.drafts.get(sessionId) ?? EMPTY_DRAFT)
     const drafts = new Map(state.drafts)
-    if (draft.text || draft.attachments.length > 0) {
+    if (draft.text || draft.segments.length > 0 || draft.attachments.length > 0) {
       drafts.set(sessionId, draft)
     } else {
       drafts.delete(sessionId)
@@ -44,7 +87,40 @@ const updateDraft = (sessionId: string | null, update: (draft: Draft) => Draft) 
   })
 
 export const setDraftText = (sessionId: string | null, text: string) =>
-  updateDraft(sessionId, (draft) => ({ ...draft, text }))
+  updateDraft(sessionId, (draft) => ({
+    ...draft,
+    text,
+    segments: segmentsFromText(text),
+  }))
+
+export const setDraftSegments = (sessionId: string | null, segments: DraftSegment[]) =>
+  updateDraft(sessionId, (draft) => ({
+    ...draft,
+    segments,
+    text: serializeDraftSegments(segments),
+  }))
+
+/** 请求向指定会话输入框插入一条引用文本 */
+export const requestInsertQuote = (sessionId: string | null, text: string) => {
+  const normalized = text.trim()
+  if (!normalized) {
+    return
+  }
+  quoteSeq += 1
+  useDrafts.setState({
+    pendingQuote: {
+      seq: quoteSeq,
+      sessionId,
+      text: normalized,
+    },
+  })
+}
+
+export const consumePendingQuote = (seq: number) => {
+  if (useDrafts.getState().pendingQuote?.seq === seq) {
+    useDrafts.setState({ pendingQuote: null })
+  }
+}
 
 const upload = (attachment: DraftAttachment, apiKey: string) => {
   // 上传任务负责记录错误，输入框的附件卡片展示失败及重试入口。
@@ -95,9 +171,51 @@ export const retryDraftAttachment = (
   }
 }
 
+const toMessageSegments = (segments: DraftSegment[]): UserMessageSegment[] | undefined => {
+  if (!segments.some((segment) => segment.type === 'quote')) {
+    return undefined
+  }
+  const normalized: UserMessageSegment[] = []
+  for (const segment of segments) {
+    if (segment.type === 'quote') {
+      const text = segment.text.trim()
+      if (text) {
+        normalized.push({ type: 'quote', text })
+      }
+      continue
+    }
+    if (!segment.text) {
+      continue
+    }
+    const prev = normalized.at(-1)
+    if (prev?.type === 'text') {
+      prev.text += segment.text
+    } else {
+      normalized.push({ type: 'text', text: segment.text })
+    }
+  }
+  const first = normalized[0]
+  if (first?.type === 'text') {
+    first.text = first.text.replace(/^\s+/, '')
+    if (!first.text) {
+      normalized.shift()
+    }
+  }
+  const last = normalized.at(-1)
+  if (last?.type === 'text') {
+    last.text = last.text.replace(/\s+$/, '')
+    if (!last.text) {
+      normalized.pop()
+    }
+  }
+  return normalized.length > 0 ? normalized : undefined
+}
+
 /** 发送按钮和实际提交共用规则：有内容，且全部附件已上传成功。 */
 export const prepareDraftMessage = (draft: Draft, tasks: Record<string, UploadTask>) => {
-  const text = draft.text.trim()
+  const text = (
+    draft.segments.length > 0 ? serializeDraftSegments(draft.segments) : draft.text
+  ).trim()
   if (!text && draft.attachments.length === 0) {
     return null
   }
@@ -117,7 +235,8 @@ export const prepareDraftMessage = (draft: Draft, tasks: Record<string, UploadTa
       blob: attachment.file,
     })
   }
-  return { text, files }
+  const segments = toMessageSegments(draft.segments)
+  return { text, segments, files }
 }
 
 const releaseAttachment = (attachment: DraftAttachment, cancel: boolean) => {
@@ -157,5 +276,5 @@ export const clearAllDrafts = () => {
   for (const draft of useDrafts.getState().drafts.values()) {
     draft.attachments.forEach((attachment) => releaseAttachment(attachment, true))
   }
-  useDrafts.setState({ drafts: new Map() })
+  useDrafts.setState({ drafts: new Map(), pendingQuote: null })
 }

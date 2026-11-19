@@ -8,6 +8,7 @@ import { stopReadAloud } from '../../services/speech/readAloud.js'
 import type { UserMessage as UserMessageType } from '../../services/chat/types.js'
 import { Button } from '../base/Button.js'
 import { IconButton } from '../base/IconButton.js'
+import { formatQuoteDisplay } from '../chatInput/quoteEditor.js'
 import { ensureApiKey } from '../settings/settingsDialogState.js'
 import {
   BranchSwitcher,
@@ -17,6 +18,15 @@ import {
 import { MessageFile } from './MessageFile.js'
 import { CopyButton } from './CopyButton.js'
 import styles from './UserMessage.module.css'
+
+const QuoteMarkIcon = () => (
+  <svg width={13} height={13} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path
+      d="M6.8 3.2C4.15 4.42 2.5 6.72 2.5 9.55C2.5 11.42 3.74 12.7 5.38 12.7C6.82 12.7 7.9 11.63 7.9 10.22C7.9 8.88 6.92 7.88 5.66 7.82C5.45 7.81 5.24 7.83 5.04 7.89C5.29 6.38 6.24 5.17 7.58 4.44L6.8 3.2ZM13.5 3.2C10.85 4.42 9.2 6.72 9.2 9.55C9.2 11.42 10.44 12.7 12.08 12.7C13.52 12.7 14.6 11.63 14.6 10.22C14.6 8.88 13.62 7.88 12.36 7.82C12.15 7.81 11.94 7.83 11.74 7.89C11.99 6.38 12.94 5.17 14.28 4.44L13.5 3.2Z"
+      fill="currentColor"
+    />
+  </svg>
+)
 
 export const UserMessage = memo(function UserMessage({
   sessionId,
@@ -115,7 +125,31 @@ export const UserMessage = memo(function UserMessage({
         </div>
       ) : (
         <>
-          {message.content ? <div className={styles.bubble}>{message.content}</div> : null}
+          {message.content || message.segments?.length ? (
+            <div className={styles.bubble}>
+              {message.segments && message.segments.length > 0
+                ? message.segments.map((segment, index) =>
+                    segment.type === 'quote' ? (
+                      <span
+                        key={index}
+                        className={clsx(styles.quoteToken, index > 0 && styles.quoteTokenSpaced)}
+                        data-quote-preview="true"
+                        data-quote-text={segment.text}
+                      >
+                        <span className={styles.quoteIcon} aria-hidden="true">
+                          <QuoteMarkIcon />
+                        </span>
+                        <span className={styles.quoteLabel}>
+                          {formatQuoteDisplay(segment.text)}
+                        </span>
+                      </span>
+                    ) : (
+                      <span key={index}>{segment.text}</span>
+                    )
+                  )
+                : message.content}
+            </div>
+          ) : null}
           <div className={styles.bottom}>
             <div className={clsx(styles.actions, isLast && styles.alwaysShow)}>
               {message.content ? <CopyButton text={message.content} /> : null}

@@ -553,7 +553,7 @@ export const sendMessage = (targetSessionId: string | null) => {
   if (!prepared) {
     return false
   }
-  const { text, files } = prepared
+  const { text, segments, files } = prepared
   const now = Date.now()
   let sessionId = targetSessionId
   if (
@@ -588,6 +588,7 @@ export const sendMessage = (targetSessionId: string | null) => {
     id: createId(),
     role: 'user',
     content: text,
+    ...(segments ? { segments } : {}),
     files: files.map(({ id, serverId, name, size, isImage, mimeType }) => ({
       id,
       serverId,

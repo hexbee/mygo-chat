@@ -1,10 +1,15 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'mygo-cli'
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+  version: string
+}
 
 export default defineConfig({
   name: 'DeepSeek Chat',
   slug: 'deepseek-chat',
   identifier: 'com.deepseek.chat',
-  version: '0.1.8',
+  version: pkg.version,
   copyright: '© 2026 DeepSeek Chat',
 
   devUrl: 'http://localhost:8090',

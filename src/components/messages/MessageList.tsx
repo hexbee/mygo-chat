@@ -11,6 +11,7 @@ import { closeSearchPanel } from '../search/searchPanelState.js'
 import { clearPendingScroll, useChatSearch } from '../chatSearch/chatSearchState.js'
 import { AssistantMessage } from './AssistantMessage.js'
 import { ScrollToBottomContext } from './scrollContext.js'
+import { SelectionQuotePopover } from './SelectionQuotePopover.js'
 import { UserMessage } from './UserMessage.js'
 import type { Message } from '../../services/chat/types.js'
 
@@ -198,6 +199,11 @@ export const MessageList = ({
             )}
           </div>
         </div>
+        <SelectionQuotePopover
+          sessionId={session.id}
+          containerRef={contentRef}
+          scrollRef={scrollRef}
+        />
         {footer}
       </div>
     </ScrollToBottomContext.Provider>

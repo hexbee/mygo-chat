@@ -12,14 +12,18 @@ import { useIsMobile } from '../../app/viewport.js'
 import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
 import {
   addDraftFiles,
+  consumePendingQuote,
   EMPTY_DRAFT,
   getDraft,
   prepareDraftMessage,
   removeDraftAttachment,
   retryDraftAttachment,
+  setDraftSegments,
   setDraftText,
   useDrafts,
+  type DraftSegment,
 } from '../../services/chat/drafts.js'
+import { createId } from '../../utils/id.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
 import { IconButton } from '../base/IconButton.js'
 import { Tooltip } from '../base/Tooltip.js'
@@ -31,10 +35,29 @@ import { DraftAttachments } from './DraftAttachments.js'
 import { useVoiceInput } from './useVoiceInput.js'
 import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
+import {
+  handleAtomicQuoteDeletion,
+  insertPlainTextAtRange,
+  insertQuoteAtRange,
+  isCaretAtEnd,
+  isCaretAtStart,
+  moveCaretToEnd,
+  parseEditorSegments,
+  removeQuoteToken,
+  renderEditorSegments,
+} from './quoteEditor.js'
 import { useTranslate } from '../../i18n/index.js'
 import styles from './ChatInput.module.css'
 
-/** 输入框：自适应高度的文本框 + 文件 + 深度思考与智能搜索开关 + 语音输入 + 发送 / 停止 */
+const QUOTE_CLASSES = {
+  token: styles.quoteToken,
+  icon: styles.quoteIcon,
+  quoteGlyph: styles.quoteGlyph,
+  removeGlyph: styles.removeGlyph,
+  label: styles.quoteLabel,
+}
+
+/** 输入框：自适应高度的富文本输入框（支持内联多引用） + 文件 + 深度思考与智能搜索开关 + 语音输入 + 发送 / 停止 */
 export const ChatInput = memo(function ChatInput({ sessionId }: { sessionId: string | null }) {
   // 切换目标时释放录音、转写和 DOM 状态；文字与附件由草稿服务保留。
   return <Input key={sessionId === null ? 'new' : `session:${sessionId}`} sessionId={sessionId} />
@@ -43,8 +66,9 @@ export const ChatInput = memo(function ChatInput({ sessionId }: { sessionId: str
 const Input = ({ sessionId }: { sessionId: string | null }) => {
   const t = useTranslate()
   const draft = useDrafts((state) => state.drafts.get(sessionId) ?? EMPTY_DRAFT)
-  const { text, attachments } = draft
-  const setText = (value: string) => setDraftText(sessionId, value)
+  const pendingQuote = useDrafts((state) => state.pendingQuote)
+  const { segments, attachments } = draft
+  const isEmpty = segments.length === 0
   const draftReady = useUploads((state) => prepareDraftMessage(draft, state.tasks) !== null)
   const streaming = useChatStore(
     (state) => sessionId !== null && Object.hasOwn(state.streaming, sessionId)
@@ -54,12 +78,25 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const isMobile = useIsMobile()
   const search = useSettings((state) => state.search)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorRef = useRef<HTMLDivElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
   const historyIndexRef = useRef<number>(-1)
-  const savedDraftRef = useRef<string>('')
+  const savedDraftRef = useRef<DraftSegment[]>([])
+  const savedRangeRef = useRef<Range | null>(null)
+  const composingRef = useRef(false)
+  const lastSyncedSegmentsRef = useRef<DraftSegment[] | null>(null)
 
-  const getUserMessagesHistory = useCallback((): string[] => {
+  const syncFromDom = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor) {
+      return
+    }
+    const nextSegments = parseEditorSegments(editor)
+    lastSyncedSegmentsRef.current = nextSegments
+    setDraftSegments(sessionId, nextSegments)
+  }, [sessionId])
+
+  const getUserMessagesHistory = useCallback((): DraftSegment[][] => {
     if (!sessionId) {
       return []
     }
@@ -67,15 +104,82 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     if (!session || !session.messages) {
       return []
     }
-    const userMsgs: string[] = []
+    const userMsgs: DraftSegment[][] = []
     for (let i = session.messages.length - 1; i >= 0; i--) {
       const m = session.messages[i]
-      if (m.role === 'user' && m.content?.trim()) {
-        userMsgs.push(m.content)
+      if (m.role === 'user' && (m.content?.trim() || m.segments?.length)) {
+        if (m.segments && m.segments.length > 0) {
+          userMsgs.push(
+            m.segments.map((segment) =>
+              segment.type === 'quote'
+                ? { type: 'quote', id: createId(), text: segment.text }
+                : { type: 'text', text: segment.text }
+            )
+          )
+        } else {
+          userMsgs.push([{ type: 'text', text: m.content }])
+        }
       }
     }
     return userMsgs
   }, [sessionId])
+
+  // 外部草稿变化（初始化、清空、切换历史等）同步到 contentEditable DOM；本地输入已同步时跳过，避免打断光标与 IME。
+  useLayoutEffect(() => {
+    const editor = editorRef.current
+    if (!editor || lastSyncedSegmentsRef.current === segments) {
+      return
+    }
+    renderEditorSegments(editor, segments, QUOTE_CLASSES)
+    lastSyncedSegmentsRef.current = segments
+  }, [segments])
+
+  // 桌面端挂载后自动聚焦输入框
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!isMobile && editor && !importingHistory) {
+      editor.focus({ preventScroll: true })
+      moveCaretToEnd(editor)
+    }
+  }, [isMobile, importingHistory])
+
+  // 记录输入框内最近一次光标位置，便于选中消息文本后点击「引用文本」时在原光标处插入
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const editor = editorRef.current
+      const selection = window.getSelection()
+      if (!editor || !selection || selection.rangeCount === 0) {
+        return
+      }
+      const range = selection.getRangeAt(0)
+      if (editor.contains(range.startContainer) && editor.contains(range.endContainer)) {
+        savedRangeRef.current = range.cloneRange()
+      }
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => document.removeEventListener('selectionchange', onSelectionChange)
+  }, [])
+
+  // 响应消息列表发来的引用文本插入请求，支持连续多引用
+  useEffect(() => {
+    if (!pendingQuote || pendingQuote.sessionId !== sessionId) {
+      return
+    }
+    const editor = editorRef.current
+    if (!editor) {
+      return
+    }
+    consumePendingQuote(pendingQuote.seq)
+    historyIndexRef.current = -1
+    savedRangeRef.current = insertQuoteAtRange(
+      editor,
+      savedRangeRef.current,
+      createId(),
+      pendingQuote.text,
+      QUOTE_CLASSES
+    )
+    syncFromDom()
+  }, [pendingQuote, sessionId, syncFromDom])
 
   useLayoutEffect(() => {
     const toggles = togglesRef.current
@@ -123,15 +227,15 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
 
   /** 转写结果插入到光标处，并把光标移到插入内容之后 */
   const voice = useVoiceInput((transcript) => {
-    const textarea = textareaRef.current
-    const current = getDraft(sessionId).text
-    const start = textarea?.selectionStart ?? current.length
-    const end = textarea?.selectionEnd ?? current.length
-    setText(current.slice(0, start) + transcript + current.slice(end))
-    requestAnimationFrame(() => {
-      textarea?.focus({ preventScroll: true })
-      textarea?.setSelectionRange(start + transcript.length, start + transcript.length)
-    })
+    const editor = editorRef.current
+    if (!editor) {
+      const current = getDraft(sessionId).text
+      setDraftText(sessionId, current + transcript)
+      return
+    }
+    historyIndexRef.current = -1
+    savedRangeRef.current = insertPlainTextAtRange(editor, savedRangeRef.current, transcript)
+    syncFromDom()
   })
 
   // 欢迎页导入后会话 ID 不变，不能依赖卸载取消语音；订阅开始事件也覆盖快速完成的导入。
@@ -164,11 +268,12 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     if (!ensureApiKey() || !sendMessage(sessionId)) {
       return
     }
+    savedRangeRef.current = null
     stopReadAloud()
     if (isMobile) {
-      textareaRef.current?.blur()
+      editorRef.current?.blur()
     } else {
-      textareaRef.current?.focus()
+      editorRef.current?.focus({ preventScroll: true })
     }
   }
 
@@ -176,27 +281,54 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     <div
       className={clsx(styles.wrapper, sessionId === null ? styles.home : styles.session)}
       onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          textareaRef.current?.focus({ preventScroll: true })
+        if (event.target === event.currentTarget && editorRef.current) {
+          editorRef.current.focus({ preventScroll: true })
+          moveCaretToEnd(editorRef.current)
         }
       }}
     >
       <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
       <div className={styles.textareaWrapper}>
-        <textarea
-          ref={textareaRef}
-          className={clsx(styles.textarea, recording && isMobile && styles.textareaHidden)}
-          placeholder={t('chatInputPlaceholderChat')}
-          rows={2}
-          // 移动端不自动聚焦，避免一打开就弹出键盘
-          autoFocus={!isMobile}
-          disabled={importingHistory}
-          value={text}
-          onChange={(event) => {
+        <div
+          ref={editorRef}
+          role="textbox"
+          aria-multiline="true"
+          aria-label={t('chatInputPlaceholderChat')}
+          aria-disabled={importingHistory || undefined}
+          contentEditable={!importingHistory}
+          suppressContentEditableWarning
+          data-placeholder={t('chatInputPlaceholderChat')}
+          data-empty={isEmpty ? 'true' : undefined}
+          className={clsx(styles.editor, recording && isMobile && styles.textareaHidden)}
+          onCompositionStart={() => {
+            composingRef.current = true
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false
             historyIndexRef.current = -1
-            setText(event.target.value)
+            syncFromDom()
+          }}
+          onInput={() => {
+            if (composingRef.current) {
+              return
+            }
+            historyIndexRef.current = -1
+            syncFromDom()
           }}
           onMouseDown={(event) => {
+            const removeButton = (event.target as Element | null)?.closest(
+              '[data-quote-remove="true"]'
+            )
+            if (removeButton && editorRef.current) {
+              const token = removeButton.closest<HTMLElement>('[data-quote-id]')
+              if (token) {
+                event.preventDefault()
+                historyIndexRef.current = -1
+                savedRangeRef.current = removeQuoteToken(editorRef.current, token)
+                syncFromDom()
+                return
+              }
+            }
             // 首次点击时手动聚焦，避免 Safari 把整个页面滚到输入框位置。
             if (isMobile && event.button === 0 && document.activeElement !== event.currentTarget) {
               event.preventDefault()
@@ -204,7 +336,29 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             }
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            if (event.nativeEvent.isComposing || composingRef.current) {
+              return
+            }
+
+            if (event.key === 'Backspace' && editorRef.current) {
+              if (handleAtomicQuoteDeletion(editorRef.current, 'backward')) {
+                event.preventDefault()
+                historyIndexRef.current = -1
+                syncFromDom()
+                return
+              }
+            }
+
+            if (event.key === 'Delete' && editorRef.current) {
+              if (handleAtomicQuoteDeletion(editorRef.current, 'forward')) {
+                event.preventDefault()
+                historyIndexRef.current = -1
+                syncFromDom()
+                return
+              }
+            }
+
+            if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
               historyIndexRef.current = -1
               send()
@@ -218,26 +372,22 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               !event.altKey &&
               !event.metaKey &&
               !event.ctrlKey &&
-              !event.nativeEvent.isComposing
+              editorRef.current
             ) {
-              const textarea = event.currentTarget
-              const isAtStart = textarea.selectionStart === 0 && textarea.selectionEnd === 0
-              if (isAtStart || !text) {
+              if (isEmpty || isCaretAtStart(editorRef.current)) {
                 const history = getUserMessagesHistory()
                 if (history.length > 0) {
                   const nextIndex = historyIndexRef.current + 1
                   if (nextIndex < history.length) {
                     event.preventDefault()
                     if (historyIndexRef.current === -1) {
-                      savedDraftRef.current = text
+                      savedDraftRef.current = segments
                     }
                     historyIndexRef.current = nextIndex
-                    const newText = history[nextIndex]
-                    setText(newText)
+                    setDraftSegments(sessionId, history[nextIndex])
                     requestAnimationFrame(() => {
-                      if (textareaRef.current) {
-                        textareaRef.current.selectionStart = newText.length
-                        textareaRef.current.selectionEnd = newText.length
+                      if (editorRef.current) {
+                        moveCaretToEnd(editorRef.current)
                       }
                     })
                   }
@@ -253,22 +403,20 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               !event.altKey &&
               !event.metaKey &&
               !event.ctrlKey &&
-              !event.nativeEvent.isComposing
+              editorRef.current
             ) {
-              const textarea = event.currentTarget
-              const isAtEnd =
-                textarea.selectionStart === text.length && textarea.selectionEnd === text.length
-              if ((isAtEnd || !text) && historyIndexRef.current >= 0) {
+              if ((isEmpty || isCaretAtEnd(editorRef.current)) && historyIndexRef.current >= 0) {
                 event.preventDefault()
                 const history = getUserMessagesHistory()
                 const nextIndex = historyIndexRef.current - 1
                 historyIndexRef.current = nextIndex
-                const newText = nextIndex === -1 ? savedDraftRef.current : history[nextIndex]
-                setText(newText)
+                setDraftSegments(
+                  sessionId,
+                  nextIndex === -1 ? savedDraftRef.current : history[nextIndex]
+                )
                 requestAnimationFrame(() => {
-                  if (textareaRef.current) {
-                    textareaRef.current.selectionStart = newText.length
-                    textareaRef.current.selectionEnd = newText.length
+                  if (editorRef.current) {
+                    moveCaretToEnd(editorRef.current)
                   }
                 })
               }
@@ -280,13 +428,22 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             if (files.length > 0) {
               event.preventDefault()
               acceptFiles(files)
+              return
+            }
+            const plainText = event.clipboardData.getData('text/plain')
+            event.preventDefault()
+            if (plainText && editorRef.current) {
+              historyIndexRef.current = -1
+              savedRangeRef.current = insertPlainTextAtRange(
+                editorRef.current,
+                savedRangeRef.current,
+                plainText
+              )
+              syncFromDom()
             }
           }}
         />
         {recording && isMobile ? <Spectrum getAnalyser={voice.getAnalyser} /> : null}
-        <div className={styles.mirror} aria-hidden>
-          {`${text}\n`}
-        </div>
       </div>
       <div className={styles.functionRow}>
         {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}

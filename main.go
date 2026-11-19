@@ -1,7 +1,9 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,7 +13,18 @@ import (
 	"github.com/egoist/mygo"
 )
 
-const CurrentAppVersion = "0.1.8"
+//go:embed package.json
+var packageJSON []byte
+
+var CurrentAppVersion = func() string {
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(packageJSON, &pkg); err != nil || pkg.Version == "" {
+		return "0.0.0"
+	}
+	return pkg.Version
+}()
 
 // AppService provides basic desktop metadata and native bridge
 type AppService struct{}

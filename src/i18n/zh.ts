@@ -188,4 +188,5 @@ export const zh = {
   searchChats: '搜索对话',
   searchChatsPlaceholder: '搜索对话内容...',
   searchChatsNoResult: '未找到相关对话',
+  quoteText: '引用文本',
 } as const

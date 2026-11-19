@@ -1,0 +1,57 @@
+.popover {
+  position: fixed;
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: var(--dsw-shadow-lv3);
+  transform: translateX(-50%);
+  animation: fadeIn 120ms ease-out;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+
+  &:hover {
+    background: var(--dsw-alias-interactive-bg-hover-accent);
+  }
+
+  &:active {
+    transform: translateX(-50%) scale(0.97);
+  }
+
+  [data-ds-dark-theme] & {
+    background: var(--dsw-static-neutral-bluish-850);
+    border-color: var(--dsw-alias-border-l2);
+    box-shadow:
+      0 6px 20px rgba(0, 0, 0, 0.36),
+      0 1px 3px rgba(0, 0, 0, 0.24);
+
+    &:hover {
+      background: var(--dsw-static-neutral-bluish-800);
+    }
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}

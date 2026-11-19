@@ -5,6 +5,10 @@ declare const styles: {
   readonly files: string
   readonly filesWithDocuments: string
   readonly bubble: string
+  readonly quoteToken: string
+  readonly quoteTokenSpaced: string
+  readonly quoteIcon: string
+  readonly quoteLabel: string
   readonly bottom: string
   readonly alwaysShow: string
   readonly editor: string

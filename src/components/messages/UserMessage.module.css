@@ -40,6 +40,34 @@
   word-break: break-word;
 }
 
+.quoteToken {
+  display: inline;
+  color: var(--dsw-alias-brand-text);
+}
+
+.quoteTokenSpaced {
+  margin-left: 6px;
+}
+
+.quoteIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: 0.12em;
+  margin-right: 4px;
+  color: var(--dsw-alias-brand-text);
+
+  svg {
+    display: block;
+    width: 13px;
+    height: 13px;
+  }
+}
+
+.quoteLabel {
+  color: var(--dsw-alias-brand-text);
+}
+
 @media not all and (min-width: 440px) {
   .bubble {
     max-width: calc(100% - 68px);

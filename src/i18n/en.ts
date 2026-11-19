@@ -197,4 +197,5 @@ export const en = {
   searchChats: 'Search chats',
   searchChatsPlaceholder: 'Search chat content...',
   searchChatsNoResult: 'No matching chats found',
+  quoteText: 'Quote text',
 } satisfies Record<keyof typeof zh, string>

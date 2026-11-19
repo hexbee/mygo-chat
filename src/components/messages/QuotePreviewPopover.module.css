@@ -1,0 +1,41 @@
+.popover {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  max-width: min(380px, calc(100vw - 24px));
+  max-height: 260px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-color) transparent;
+  box-shadow: var(--dsw-shadow-lv3);
+  animation: fadeIn 120ms ease-out;
+
+  [data-ds-dark-theme] & {
+    background: var(--dsw-static-neutral-bluish-850);
+    border-color: var(--dsw-alias-border-l2);
+    box-shadow:
+      0 8px 28px rgba(0, 0, 0, 0.42),
+      0 2px 6px rgba(0, 0, 0, 0.26);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

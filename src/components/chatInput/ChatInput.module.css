@@ -168,37 +168,96 @@
   width: 100%;
 }
 
-.textarea,
-.mirror {
+.editor {
+  position: relative;
   display: block;
   box-sizing: border-box;
   width: 100%;
   min-height: calc(var(--line-height) * 2 + var(--input-padding-top));
+  max-height: 336px;
   margin: 0;
   padding: var(--input-padding-top) 12px 0 16px;
   border: none;
+  outline: none;
   font: inherit;
   line-height: inherit;
   font-variant-ligatures: no-contextual;
   word-break: break-word;
   white-space: pre-wrap;
-  overflow: auto;
-}
-
-.textarea {
-  position: absolute;
-  height: 100%;
-  resize: none;
-  outline: none;
+  overflow-y: auto;
   overscroll-behavior: contain;
   background-color: transparent;
   color: var(--dsw-alias-label-primary);
   caret-color: var(--dsw-alias-brand-text);
 
-  &::placeholder {
+  &[data-empty='true']::before {
+    content: attr(data-placeholder);
     color: var(--dsw-alias-label-caption);
+    pointer-events: none;
     user-select: none;
   }
+
+  &[aria-disabled='true'] {
+    pointer-events: none;
+    opacity: 0.6;
+  }
+}
+
+.quoteToken {
+  display: inline;
+  color: var(--dsw-alias-brand-text);
+  user-select: none;
+  cursor: default;
+
+  &:hover .quoteGlyph,
+  &[data-quote-previewing='true'] .quoteGlyph {
+    display: none;
+  }
+
+  &:hover .removeGlyph,
+  &[data-quote-previewing='true'] .removeGlyph {
+    display: inline-flex;
+  }
+}
+
+.quoteIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  vertical-align: -0.12em;
+  margin-right: 4px;
+  color: var(--dsw-alias-brand-text);
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+
+  &:hover {
+    opacity: 0.72;
+  }
+
+  svg {
+    display: block;
+    width: 14px;
+    height: 14px;
+  }
+}
+
+.quoteGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-2px);
+}
+
+.removeGlyph {
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.quoteLabel {
+  color: var(--dsw-alias-brand-text);
 }
 
 /* 录音中由频谱接管第一行，隐藏正文但保留高度 */
@@ -207,16 +266,9 @@
 }
 
 @media not all and (min-width: 440px) {
-  .textarea,
-  .mirror {
+  .editor {
     min-height: calc(var(--line-height) * 1.25 + var(--input-padding-top));
   }
-}
-
-.mirror {
-  visibility: hidden;
-  pointer-events: none;
-  max-height: 336px;
 }
 
 @media not all and (min-width: 768px) {

@@ -19,6 +19,7 @@ import { SettingsDialog } from '../components/settings/SettingsDialog.js'
 import { ChatSearchModal } from '../components/chatSearch/ChatSearchModal.js'
 import { UpdateDialog } from '../components/updater/UpdateDialog.js'
 import { Toast } from '../components/base/Toast.js'
+import { QuotePreviewPopover } from '../components/messages/QuotePreviewPopover.js'
 import { showToast } from '../components/base/toastState.js'
 import { onUploadNotice } from '../services/attachments.js'
 import { Button } from '../components/base/Button.js'
@@ -139,6 +140,7 @@ export const App = () => {
       <ChatSearchModal />
       <SettingsDialog />
       <UpdateDialog />
+      <QuotePreviewPopover />
       <Toast />
     </>
   )

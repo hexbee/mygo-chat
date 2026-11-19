@@ -32,10 +32,16 @@ type MessageBranch = {
   selectedChildId?: string
 }
 
+export type UserMessageSegment =
+  | { type: 'text'; text: string }
+  | { type: 'quote'; text: string }
+
 export type UserMessage = MessageBranch & {
   id: string
   role: 'user'
   content: string
+  /** 含内联引用时保存结构化片段，用于在气泡中保持蓝色引用样式 */
+  segments?: UserMessageSegment[]
   files: FileAttachment[]
   createdAt: number
 }
