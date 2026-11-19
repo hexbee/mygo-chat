@@ -17,12 +17,14 @@
   }
 
   @media (hover: hover) {
-    &:not(.active):hover {
+    &:not(.active):hover,
+    &:not(.active):has([aria-expanded='true']) {
       background-color: var(--dsw-specific-sidebar-nav-item-hover);
     }
 
     &:hover,
-    &.active {
+    &.active,
+    &:has([aria-expanded='true']) {
       .action {
         display: flex;
       }
