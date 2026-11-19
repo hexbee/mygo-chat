@@ -6,11 +6,11 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 }
 
 export default defineConfig({
-  name: 'DeepSeek Chat',
-  slug: 'deepseek-chat',
-  identifier: 'com.deepseek.chat',
+  name: 'Vela',
+  slug: 'vela',
+  identifier: 'io.hexbee.vela',
   version: pkg.version,
-  copyright: '© 2026 DeepSeek Chat',
+  copyright: '© 2026 Vela',
 
   devUrl: 'http://localhost:8090',
   devCommand: 'pnpm run dev:web',
@@ -27,7 +27,7 @@ export default defineConfig({
   macos: {
     minimumSystemVersion: '12.0',
     infoPlist: {
-      NSMicrophoneUsageDescription: 'DeepSeek Chat 需要麦克风权限以支持语音输入和实时录音功能。',
+      NSMicrophoneUsageDescription: 'Vela 需要麦克风权限以支持语音输入和实时录音功能。',
     },
   },
 })

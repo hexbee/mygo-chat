@@ -214,7 +214,7 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		win := mygo.NewWindow(mygo.WindowOptions{
-			Title:           "DeepSeek Chat",
+			Title:           "Vela",
 			Width:           1160,
 			Height:          840,
 			MinWidth:        520,

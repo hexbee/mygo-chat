@@ -2,6 +2,9 @@ declare const styles: {
   readonly sider: string
   readonly top: string
   readonly topActions: string
+  readonly brand: string
+  readonly brandBadge: string
+  readonly brandIcon: string
   readonly appName: string
   readonly newChat: string
   readonly newChatIcon: string

@@ -6,6 +6,7 @@ import {
   IconSearchOutline16,
   IconSettingsOutline16,
   NewChatIcon,
+  VelaBrandMark,
 } from '../base/icons.js'
 import { openChatSearch } from '../chatSearch/chatSearchState.js'
 import { setSiderCollapsed } from '../../services/settings.js'
@@ -66,7 +67,12 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   return (
     <div className={clsx(styles.sider, mobile && styles.mobile)}>
       <div className={styles.top}>
-        <div className={styles.appName}>{t('appName')}</div>
+        <div className={styles.brand}>
+          <span className={styles.brandBadge}>
+            <VelaBrandMark size={18} className={styles.brandIcon} />
+          </span>
+          <span className={styles.appName}>{t('appName')}</span>
+        </div>
         <div className={styles.topActions}>
           <IconButton
             size="m"

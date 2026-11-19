@@ -1,7 +1,8 @@
 import type { zh } from './zh.js'
 
 export const en = {
-  welcomeMessageChat250808: 'How can I help you?',
+  welcomeMessageChat250808: 'Ready when you are.',
+  welcomeSubtitle: 'Dim the noise. Keep a quiet light for thinking.',
   contentCaveat: 'AI-generated, for reference only',
   expandSiderbarButton: 'Open sidebar',
   collapseSiderbarButton: 'Close sidebar',
@@ -14,7 +15,7 @@ export const en = {
     'Chats or attachments have not been saved locally. Retry before closing this page.',
   sessionDeleteFailed: 'Unable to delete this chat. Please try again.',
   settings: 'Settings',
-  appName: 'API usage demo',
+  appName: 'Vela',
   deleteSessionModalContentTitle: 'Delete chat?',
   deleteSessionWithFilesDescription:
     'This chat and its uploaded files will be permanently deleted and cannot be recovered. Delete this chat?',
@@ -83,7 +84,7 @@ export const en = {
   groupTitleToolOpen: 'Browsing the web',
   messageThinking: 'Thinking',
   backupInvalidJson: 'The file is not valid JSON.',
-  backupUnrecognized: 'File not recognized. Please choose a DeepSeek chat history ZIP.',
+  backupUnrecognized: 'File not recognized. Please choose a Vela or DeepSeek chat history ZIP.',
   backupNewerVersion: 'This file uses a newer version. Please update the app before importing.',
   backupInvalidVersion: 'The file version is invalid and cannot be imported.',
   backupIncomplete: 'The file is incomplete and cannot be imported.',
@@ -116,11 +117,11 @@ export const en = {
   historyImportConfirmDescription:
     'The uploaded chat history will replace all your current chats. Import anyway?',
   historyImportDescription:
-    'Importing chat history replaces all local chats and attachments. Supports ZIP files exported from DeepSeek.',
+    'Importing chat history replaces all local chats and attachments. Supports ZIP files exported from Vela or DeepSeek.',
   historyImportedOne: 'Imported 1 chat',
   historyImported: 'Imported {count} chats',
   historyImportFailed:
-    'File import failed. The file format may be invalid, or the ZIP file may use an older chat export format. Please export your chat history from DeepSeek again and retry the import.',
+    'File import failed. The file format may be invalid, or the ZIP file may use an older chat export format. Please re-export your chat history and retry the import.',
   historyExportFailed: 'Export failed: {message}',
   exportAllLabel: 'Export all chats',
   historyExportDescription:
@@ -160,13 +161,13 @@ export const en = {
   voiceInputStop: 'Stop recording and transcribe',
   voiceInputCancel: 'Transcribing. Click to cancel',
   voiceInputPermissionDenied:
-    'Microphone access is blocked. Please allow it in your browser settings.',
+    'Microphone access is blocked. Please allow Vela to access the microphone in System Settings.',
   voiceInputNoDevice: 'No microphone detected',
   voiceInputTooLong: 'Recording is too long. Please shorten it and try again.',
   voiceInputFailed: 'Speech recognition failed. Please try again later.',
   voiceInputEmpty: 'No speech detected',
   voiceInputLimitReached: 'Maximum recording length reached',
-  voiceInputRequiresHttps: 'Voice input requires HTTPS',
+  voiceInputRequiresHttps: 'Voice input is unavailable in the current environment',
   apiKeyInvalidRetry: 'Invalid API Key. Please change it and try again.',
   insufficientBalance: 'Insufficient balance',
   rateLimited: 'Too many requests. Please try again later.',

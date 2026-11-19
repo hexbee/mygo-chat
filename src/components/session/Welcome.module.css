@@ -26,16 +26,45 @@
   padding: 0 32px 64px;
 }
 
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 28px;
+  text-align: center;
+}
+
+.brandBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
 .greeting {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 21px;
+  margin-bottom: 6px;
   font-size: 24px;
   line-height: 32px;
   font-weight: 600;
   text-align: center;
   color: var(--dsw-alias-label-primary);
+}
+
+.subtitle {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+  user-select: none;
 }
 
 @media (max-width: 439px) {
@@ -60,7 +89,7 @@
     padding: 0 16px env(safe-area-inset-bottom);
   }
 
-  .greeting {
+  .hero {
     flex-shrink: 0;
     margin: auto 0;
   }

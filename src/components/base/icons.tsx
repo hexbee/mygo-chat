@@ -603,3 +603,36 @@ export const IconUserOutline10 = () => (
   </svg>
 )
 
+/** 船帆座 · Vela 品牌标志（极简双帆 + 船身弧线） */
+export const VelaBrandMark = ({
+  size = 20,
+  className,
+}: {
+  size?: number
+  className?: string
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="2.8 2.4 17.8 17.8"
+    fill="none"
+    className={className}
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+  >
+    <path
+      d="M11.6 3.2C15.9 6.6 18.2 11.2 17.6 15.6C15.6 15.1 13.7 15.2 12.1 16C13.1 12.1 12.8 7.5 11.6 3.2Z"
+      fill="currentColor"
+    />
+    <path
+      d="M10.4 7.4C10.9 10.6 10.5 13.6 9.6 16.2C8.3 16.4 7.1 16.8 6 17.3C7.9 14.2 9.4 10.9 10.4 7.4Z"
+      fill="currentColor"
+      opacity="0.82"
+    />
+    <path
+      d="M3.6 19.6C8.1 17.5 13.8 16.7 19.8 17.1L18.2 19.2C13.6 18.2 8.4 18.4 3.6 19.6Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
