@@ -16,6 +16,7 @@ import { MobileHeader } from '../components/session/MobileHeader.js'
 import { Welcome } from '../components/session/Welcome.js'
 import { ensureApiKey } from '../components/settings/settingsDialogState.js'
 import { SettingsDialog } from '../components/settings/SettingsDialog.js'
+import { ChatSearchModal } from '../components/chatSearch/ChatSearchModal.js'
 import { UpdateDialog } from '../components/updater/UpdateDialog.js'
 import { Toast } from '../components/base/Toast.js'
 import { showToast } from '../components/base/toastState.js'
@@ -135,6 +136,7 @@ export const App = () => {
         </main>
         <SearchPanel />
       </div>
+      <ChatSearchModal />
       <SettingsDialog />
       <UpdateDialog />
       <Toast />

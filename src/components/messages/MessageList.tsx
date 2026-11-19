@@ -8,6 +8,7 @@ import {
 import { selectMessageVersion } from '../../services/chat/store.js'
 import type { Session } from '../../services/chat/types.js'
 import { closeSearchPanel } from '../search/searchPanelState.js'
+import { clearPendingScroll, useChatSearch } from '../chatSearch/chatSearchState.js'
 import { AssistantMessage } from './AssistantMessage.js'
 import { ScrollToBottomContext } from './scrollContext.js'
 import { UserMessage } from './UserMessage.js'
@@ -95,9 +96,32 @@ export const MessageList = ({
       restoreScrollRef.current = null
       return
     }
+    const pending = useChatSearch.getState().pendingScroll
+    if (pending && pending.sessionId === session.id) {
+      return
+    }
     stickyRef.current = true
     scrollToBottom()
   }, [session.id, lastMessageId, scrollToBottom])
+
+  const pendingScroll = useChatSearch((state) => state.pendingScroll)
+  useEffect(() => {
+    if (!pendingScroll || pendingScroll.sessionId !== session.id) {
+      return
+    }
+    const scroll = scrollRef.current
+    if (!scroll) {
+      return
+    }
+    const target = scroll.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(pendingScroll.messageId)}"]`
+    )
+    if (target) {
+      stickyRef.current = false
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    clearPendingScroll()
+  }, [pendingScroll, session.id])
 
   useEffect(closeSearchPanel, [session.id, lastMessageId])
 

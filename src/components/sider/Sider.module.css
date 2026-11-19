@@ -30,6 +30,13 @@
   --app-region: no-drag;
 }
 
+.topActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .appName {
   min-width: 0;
   padding-left: 4px;

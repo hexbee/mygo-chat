@@ -11,7 +11,7 @@ import (
 	"github.com/egoist/mygo"
 )
 
-const CurrentAppVersion = "0.1.7"
+const CurrentAppVersion = "0.1.8"
 
 // AppService provides basic desktop metadata and native bridge
 type AppService struct{}
@@ -91,6 +91,7 @@ func setupMenu(win *mygo.Window) {
 	preferencesLabel := "Preferences..."
 	fileLabel := "File"
 	newChatLabel := "New Chat"
+	searchChatsLabel := "Search Chats..."
 	viewLabel := "View"
 	toggleSidebarLabel := "Toggle Sidebar"
 
@@ -99,6 +100,7 @@ func setupMenu(win *mygo.Window) {
 		preferencesLabel = "偏好设置..."
 		fileLabel = "文件"
 		newChatLabel = "新建对话"
+		searchChatsLabel = "搜索对话..."
 		viewLabel = "视图"
 		toggleSidebarLabel = "切换侧边栏"
 	}
@@ -145,6 +147,15 @@ func setupMenu(win *mygo.Window) {
 					Click: func(item *mygo.MenuItem, w *mygo.Window) {
 						if win != nil && win.Page() != nil {
 							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:new-chat'))")
+						}
+					},
+				},
+				{
+					Label:       searchChatsLabel,
+					Accelerator: "CmdOrCtrl+K",
+					Click: func(item *mygo.MenuItem, w *mygo.Window) {
+						if win != nil && win.Page() != nil {
+							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:search-chats'))")
 						}
 					},
 				},

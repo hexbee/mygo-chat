@@ -194,4 +194,7 @@ export const en = {
   desktopUpdateStreamingBusy: 'Session is active. Please restart after the response finishes.',
   desktopUpdateUpToDate: 'You are on the latest version',
   desktopUpdateCheckFailed: 'Failed to check for updates. Please try again later.',
+  searchChats: 'Search chats',
+  searchChatsPlaceholder: 'Search chat content...',
+  searchChatsNoResult: 'No matching chats found',
 } satisfies Record<keyof typeof zh, string>

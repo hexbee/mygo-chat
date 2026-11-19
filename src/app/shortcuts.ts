@@ -6,28 +6,35 @@ import {
   openSettings,
   useSettingsDialog,
 } from '../components/settings/settingsDialogState.js'
+import { openChatSearch, toggleChatSearch } from '../components/chatSearch/chatSearchState.js'
 import { useUpdateStore } from '../services/updater/updateStore.js'
 import { showToast } from '../components/base/toastState.js'
 
 export const isMac =
   typeof navigator !== 'undefined' &&
-  (navigator.userAgent.includes('Macintosh') || (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform === 'macOS')
+  (navigator.userAgent.includes('Macintosh') ||
+    (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform === 'macOS')
 
 export const modKey = isMac ? '⌘' : 'Ctrl+'
 
 /**
  * 桌面端全局快捷键支持：
  * - Cmd/Ctrl + N: 开启新对话
+ * - Cmd/Ctrl + K: 打开/关闭会话搜索
  * - Cmd/Ctrl + ,: 切换设置面板
  * - Cmd/Ctrl + B: 切换展开/收起侧边栏
  */
 export const useGlobalShortcuts = () => {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.isComposing) return
+      if (e.isComposing) {
+        return
+      }
 
       const isModifier = e.metaKey || e.ctrlKey
-      if (!isModifier || e.altKey) return
+      if (!isModifier || e.altKey) {
+        return
+      }
 
       const key = e.key.toLowerCase()
 
@@ -35,6 +42,13 @@ export const useGlobalShortcuts = () => {
       if (key === 'n' && !e.shiftKey) {
         e.preventDefault()
         newChat()
+        return
+      }
+
+      // Cmd/Ctrl + K: 打开/关闭会话搜索
+      if (key === 'k' && !e.shiftKey) {
+        e.preventDefault()
+        toggleChatSearch()
         return
       }
 
@@ -59,6 +73,7 @@ export const useGlobalShortcuts = () => {
     }
 
     const onNewChat = () => newChat()
+    const onSearchChats = () => openChatSearch()
     const onOpenSettings = () => {
       if (useSettingsDialog.getState().open) {
         closeSettings()
@@ -88,6 +103,7 @@ export const useGlobalShortcuts = () => {
 
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('mygo:new-chat', onNewChat)
+    window.addEventListener('mygo:search-chats', onSearchChats)
     window.addEventListener('mygo:open-settings', onOpenSettings)
     window.addEventListener('mygo:toggle-sidebar', onToggleSidebar)
     window.addEventListener('mygo:check-update', onCheckUpdate)
@@ -95,6 +111,7 @@ export const useGlobalShortcuts = () => {
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('mygo:new-chat', onNewChat)
+      window.removeEventListener('mygo:search-chats', onSearchChats)
       window.removeEventListener('mygo:open-settings', onOpenSettings)
       window.removeEventListener('mygo:toggle-sidebar', onToggleSidebar)
       window.removeEventListener('mygo:check-update', onCheckUpdate)

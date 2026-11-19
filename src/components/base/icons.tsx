@@ -571,3 +571,35 @@ export const IconLoadingOutline14 = ({ size = 14, className }: { size?: number; 
   </svg>
 )
 
+/** 会话搜索结果列表气泡图标（带两条短横线的圆形对话气泡） */
+export const IconChatBubbleOutline16 = () => (
+  <svg width={18} height={18} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M10 2.5C5.85786 2.5 2.5 5.63401 2.5 9.5C2.5 11.1213 3.0928 12.6134 4.08826 13.8007L3.15 16.85L6.47338 15.8622C7.53593 16.2738 8.73684 16.5 10 16.5C14.1421 16.5 17.5 13.366 17.5 9.5C17.5 5.63401 14.1421 2.5 10 2.5Z"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M7 8.4H13M7 11.1H11"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+  </svg>
+)
+
+/** 会话搜索结果中用户消息的右下角小头像图标 */
+export const IconUserOutline10 = () => (
+  <svg width={10} height={10} viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="6" cy="4" r="2" stroke="currentColor" strokeWidth="1.2" />
+    <path
+      d="M2.5 10C2.85 8.35 4.25 7.4 6 7.4C7.75 7.4 9.15 8.35 9.5 10"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+    />
+  </svg>
+)
+

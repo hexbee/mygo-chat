@@ -78,6 +78,9 @@ const getDB = () =>
 export const loadSessionSummaries = async (): Promise<SessionSummary[]> =>
   (await (await getDB()).getAll('sessionSummaries')).map(toSessionSummary)
 
+export const loadAllSessions = async (): Promise<Session[]> =>
+  (await getDB()).getAll('sessions')
+
 export const loadSession = async (id: string): Promise<Session | undefined> =>
   (await getDB()).get('sessions', id)
 

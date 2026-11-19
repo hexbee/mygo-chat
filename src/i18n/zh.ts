@@ -185,4 +185,7 @@ export const zh = {
   desktopUpdateStreamingBusy: '对话正在进行中，请等待回答完毕后再重启更新',
   desktopUpdateUpToDate: '当前已是最新版本',
   desktopUpdateCheckFailed: '检查更新失败，请稍后重试',
+  searchChats: '搜索对话',
+  searchChatsPlaceholder: '搜索对话内容...',
+  searchChatsNoResult: '未找到相关对话',
 } as const
