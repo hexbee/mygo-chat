@@ -16,12 +16,17 @@
   justify-content: space-between;
   gap: 8px;
   box-sizing: border-box;
-  height: calc(48px + 6px + var(--mygo-titlebar-controls-bottom, 0px));
+  height: 52px;
   margin-bottom: 16px;
-  padding: calc(15px + 6px + var(--mygo-titlebar-controls-bottom, 0px)) 0 10px 4px;
+  padding: 12px 0 0 4px;
   flex-shrink: 0;
   -webkit-app-region: drag;
   --app-region: drag;
+
+  [data-platform='darwin'] & {
+    height: calc(48px + 6px + var(--mygo-titlebar-controls-bottom, 0px));
+    padding: calc(15px + 6px + var(--mygo-titlebar-controls-bottom, 0px)) 0 10px 4px;
+  }
 }
 
 .top button,
@@ -232,7 +237,7 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  margin: calc(12px + var(--mygo-titlebar-controls-bottom, 0px)) 0 0 16px;
+  margin: calc(12px + var(--app-titlebar-top-inset)) 0 0 16px;
 }
 
 .collapsedGroup {

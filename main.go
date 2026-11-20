@@ -45,6 +45,19 @@ func (AppService) GetAppInfo() AppInfo {
 	}
 }
 
+// SetTheme syncs the native window appearance (including Windows caption buttons)
+// with the user's theme preference ("system", "light", or "dark").
+func (AppService) SetTheme(theme string) {
+	switch theme {
+	case "dark":
+		mygo.Theme.SetSource(mygo.ThemeDark)
+	case "light":
+		mygo.Theme.SetSource(mygo.ThemeLight)
+	default:
+		mygo.Theme.SetSource(mygo.ThemeSystem)
+	}
+}
+
 // FileService handles native file dialogs and file operations
 type FileService struct{}
 

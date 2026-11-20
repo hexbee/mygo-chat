@@ -1,4 +1,6 @@
 import { useSyncExternalStore } from 'react'
+import { isMyGo } from 'mygo-runtime'
+import { AppService } from '../mygo.js'
 import { useSettings, type ThemePreference } from '../services/settings.js'
 
 export type Theme = 'light' | 'dark'
@@ -51,9 +53,17 @@ const applyTheme = (theme: Theme) => {
 }
 
 let appliedTheme: Theme | null = null
+let appliedPreference: ThemePreference | null = null
 
 const syncTheme = () => {
-  const theme = resolveTheme(useSettings.getState().themePreference, getOsTheme())
+  const preference = useSettings.getState().themePreference
+  if (preference !== appliedPreference) {
+    appliedPreference = preference
+    if (isMyGo()) {
+      void AppService.setTheme(preference).catch(() => {})
+    }
+  }
+  const theme = resolveTheme(preference, getOsTheme())
   if (theme !== appliedTheme) {
     appliedTheme = theme
     applyTheme(theme)

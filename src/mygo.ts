@@ -41,6 +41,10 @@ export const AppService = {
   getAppInfo(): Promise<AppInfo> {
     return call("AppService.GetAppInfo");
   },
+  /** SetTheme syncs the native window appearance (including Windows caption buttons) with the user's theme preference ("system", "light", or "dark"). */
+  setTheme(theme: string): Promise<void> {
+    return call("AppService.SetTheme", theme);
+  },
 } as const;
 
 /** FileService handles native file dialogs and file operations */

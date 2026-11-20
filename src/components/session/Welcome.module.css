@@ -9,9 +9,13 @@
   top: 0;
   left: 0;
   right: 0;
-  height: calc(60px + var(--mygo-titlebar-controls-bottom, 0px));
+  height: 52px;
   -webkit-app-region: drag;
   --app-region: drag;
+
+  [data-platform='darwin'] & {
+    height: calc(60px + var(--mygo-titlebar-controls-bottom, 0px));
+  }
 }
 
 .welcome {

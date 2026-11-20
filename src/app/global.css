@@ -1,6 +1,11 @@
 :root {
   --message-list-max-width: 840px;
   --message-list-padding-horizontal: 44px;
+  --app-titlebar-top-inset: 0px;
+}
+
+:root[data-platform='darwin'] {
+  --app-titlebar-top-inset: var(--mygo-titlebar-controls-bottom, 0px);
 }
 
 @media (max-width: 1023px) {
