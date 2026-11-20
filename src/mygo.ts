@@ -20,6 +20,35 @@ export interface FileOpenResult {
 /** MenuAction represents an action triggered from the native application menu or its shortcuts. */
 export type MenuAction = "check-update" | "open-settings" | "new-chat" | "search-chats" | "toggle-sidebar";
 
+/** ToolClassifyResult represents the pre-execution policy decision for a tool call. */
+export interface ToolClassifyResult {
+  /** "allow" | "ask" | "deny" */
+  decision: string;
+  reason: string;
+}
+
+/** ToolExecuteRequest is the unified RPC payload for classifying and executing a client tool. */
+export interface ToolExecuteRequest {
+  sessionId: string;
+  /** read | write | edit | delete_file | glob | grep | bash */
+  toolName: string;
+  input: Record<string, unknown>;
+  /** User workspace or existing scratchDir; empty triggers lazy scratch on write/edit */
+  workdir: string;
+  /** read-only | workspace-write | full-access */
+  permissionMode: string;
+  /** True only after one-time user approval; backend still re-verifies */
+  approved: boolean;
+}
+
+/** ToolExecuteResult separates concise model output from rich UI metadata. */
+export interface ToolExecuteResult {
+  modelContent: string;
+  isError: boolean;
+  assignedScratch?: string;
+  uiMeta?: Record<string, unknown>;
+}
+
 /** UpdateState reflects the current update status, replicating deepseek-harness update phases */
 export interface UpdateState {
   /** "idle" | "checking" | "available" | "downloading" | "verifying" | "ready" | "error" */
@@ -82,6 +111,28 @@ export const WorkspaceService = {
   /** RevealInFinder reveals the specified path in Finder (macOS), Explorer (Windows), or the file manager (Linux). */
   revealInFinder(absPath: string): Promise<void> {
     return call("WorkspaceService.RevealInFinder", absPath);
+  },
+} as const;
+
+/** ToolService exposes Go-native file (and later shell) tools to the frontend via mygo.Bind. */
+export const ToolService = {
+  /** CancelSessionTools cancels all active tool executions belonging to sessionID. */
+  cancelSessionTools(sessionID: string): Promise<void> {
+    return call("ToolService.CancelSessionTools", sessionID);
+  },
+  /**
+   * ClassifyToolCall performs pre-execution policy enforcement for file tools.
+   * In Phase 1 M2, this enforces fail-closed hard blocks:
+   *   - read-only denies all write/edit/delete_file calls and out-of-workspace paths
+   *   - workspace-write denies out-of-workspace paths (upgraded to ask in M4)
+   *   - full-access allows cross-directory file operations
+   */
+  classifyToolCall(req: ToolExecuteRequest): Promise<ToolClassifyResult> {
+    return call("ToolService.ClassifyToolCall", req);
+  },
+  /** ExecuteTool re-verifies policy on the backend (fail-closed) and dispatches the requested tool. */
+  executeTool(req: ToolExecuteRequest): Promise<ToolExecuteResult> {
+    return call("ToolService.ExecuteTool", req);
   },
 } as const;
 
