@@ -1,4 +1,4 @@
-module mygo-chat
+module vela-app
 
 go 1.27.4
 

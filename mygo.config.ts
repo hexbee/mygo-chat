@@ -21,7 +21,7 @@ export default defineConfig({
 
   updates: {
     publicKey: '9H5AdBh2JG1llhMVTMWcPKbWYdgfDiRKRqkYuQfIDOk=',
-    github: 'hexbee/mygo-chat',
+    github: 'hexbee/vela-app',
   },
 
   macos: {

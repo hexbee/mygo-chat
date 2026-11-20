@@ -89,7 +89,7 @@ func (s *UpdateService) CheckUpdate() (UpdateState, error) {
 	}
 
 	// 2. Fallback / Dev mode: check GitHub Releases API
-	latestVersion, notes, assetURL, err := checkGitHubRelease(ctx, "hexbee/mygo-chat")
+	latestVersion, notes, assetURL, err := checkGitHubRelease(ctx, "hexbee/vela-app")
 	if err != nil {
 		s.setPhase("error", fmt.Sprintf("检查更新失败: %v", err))
 		return s.GetUpdateStatus(), err
@@ -152,7 +152,7 @@ func (s *UpdateService) StartDownload() (UpdateState, error) {
 		}
 
 		// Fallback downloader when native update signature infrastructure isn't configured in dev
-		latestVersion, _, assetURL, err := checkGitHubRelease(ctx, "hexbee/mygo-chat")
+		latestVersion, _, assetURL, err := checkGitHubRelease(ctx, "hexbee/vela-app")
 		if err != nil || assetURL == "" {
 			s.setPhase("error", "未找到当前平台对应的安装包资产")
 			return
@@ -162,7 +162,7 @@ func (s *UpdateService) StartDownload() (UpdateState, error) {
 		if err != nil {
 			tmpDir = os.TempDir()
 		}
-		targetFile := filepath.Join(tmpDir, fmt.Sprintf("mygo-chat-update-%s-%s-%s", latestVersion, runtime.GOOS, runtime.GOARCH))
+		targetFile := filepath.Join(tmpDir, fmt.Sprintf("vela-update-%s-%s-%s", latestVersion, runtime.GOOS, runtime.GOARCH))
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
 		if err != nil {
@@ -261,7 +261,7 @@ func checkGitHubRelease(ctx context.Context, repo string) (string, string, strin
 	if err != nil {
 		return "", "", "", err
 	}
-	req.Header.Set("User-Agent", "mygo-chat-updater")
+	req.Header.Set("User-Agent", "vela-updater")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

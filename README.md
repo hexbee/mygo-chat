@@ -38,7 +38,7 @@
 
 ## 快速安装与运行
 
-前往项目的 [Releases](https://github.com/hexbee/mygo-chat/releases) 页面下载适合您操作系统的安装包：
+前往项目的 [Releases](https://github.com/hexbee/vela-app/releases) 页面下载适合您操作系统的安装包：
 
 - **macOS：** 下载 `.dmg` 文件，双击挂载并拖拽到 `Applications` 目录即可（支持 Apple Silicon 与 Intel 双架构）。
 - **Windows：** 下载 `Vela.exe` 直接运行或使用安装包。
@@ -110,7 +110,7 @@
 ```bash
 # 克隆仓库并安装依赖
 git clone <repo-url>
-cd mygo-chat
+cd vela-app
 pnpm install
 
 # 启动桌面端开发调试（自动启动 Rspack 服务并拉起桌面窗口，支持 HMR 与 Go 增量构建）
@@ -146,7 +146,7 @@ mygo build -platform darwin/arm64,darwin/amd64,windows/amd64,linux/amd64
 ## 项目结构
 
 ```text
-mygo-chat/
+vela-app/
 ├── .agents/skills/           # MyGo 智能维护与原生模块规范 (mygo-maintenance 等)
 ├── .github/workflows/        # CI/CD 自动发布打包流水线 (release.yml)
 ├── main.go                   # Go 桌面端主入口（窗口生命周期、系统服务与 IPC 注册）
