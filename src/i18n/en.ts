@@ -245,4 +245,12 @@ export const en = {
   toolOpenFile: 'Open file',
   toolProducedFilesTitle: 'Created / Modified Files',
   toolDiffTruncated: '{count} more lines not shown',
+  toolApprovalTitle: 'One-time approval required',
+  toolApprovalWorkdir: 'Working directory',
+  toolApprovalAllowOnce: 'Allow once',
+  toolApprovalReject: 'Reject',
+  toolApprovalStatusPending: 'Awaiting approval',
+  toolApprovalStatusApproved: 'Approved',
+  toolApprovalStatusRejected: 'Rejected',
+  toolExitCode: 'Exit code {code}',
 } satisfies Record<keyof typeof zh, string>

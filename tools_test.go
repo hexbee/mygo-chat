@@ -252,15 +252,28 @@ func TestSymlinkEscapeBlocked(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cls := ts.ClassifyToolCall(tc.req)
-			if cls.Decision != DecisionDeny {
-				t.Fatalf("expected deny, got %#v", cls)
+			// In read-only mode, all symlink escapes & traversals must be hard-denied even if Approved=true.
+			roReq := tc.req
+			roReq.PermissionMode = PermissionReadOnly
+			if cls := ts.ClassifyToolCall(roReq); cls.Decision != DecisionDeny {
+				t.Fatalf("read-only expected deny, got %#v", cls)
 			}
-			// Even with Approved=true, backend must hard-deny.
-			reqApproved := tc.req
-			reqApproved.Approved = true
-			if _, err := ts.ExecuteTool(reqApproved); err == nil {
-				t.Fatalf("expected ExecuteTool to deny even with Approved=true")
+			roReq.Approved = true
+			if _, err := ts.ExecuteTool(roReq); err == nil {
+				t.Fatalf("read-only ExecuteTool must deny even with Approved=true")
+			}
+
+			// In workspace-write mode, dangling symlinks are hard-denied; valid outside paths require one-time approval (ask) and fail when Approved=false.
+			cls := ts.ClassifyToolCall(tc.req)
+			if tc.name == "write through dangling symlink" {
+				if cls.Decision != DecisionDeny {
+					t.Fatalf("dangling symlink expected deny, got %#v", cls)
+				}
+			} else if cls.Decision != DecisionAsk {
+				t.Fatalf("workspace-write out-of-workspace expected ask, got %#v", cls)
+			}
+			if _, err := ts.ExecuteTool(tc.req); err == nil {
+				t.Fatalf("expected ExecuteTool to block unapproved out-of-workspace call")
 			}
 		})
 	}
@@ -330,19 +343,17 @@ func TestDeleteFileLstatTrashSafety(t *testing.T) {
 		t.Fatalf("outside target of symlink must remain intact! err=%v data=%q", err, string(gotOutside))
 	}
 
-	// 3. Refusing to delete workspace root itself.
-	res3, err := ts.ExecuteTool(ToolExecuteRequest{
+	// 3. Refusing to delete workspace root itself (hard-denied at policy layer).
+	_, err = ts.ExecuteTool(ToolExecuteRequest{
 		SessionID:      "s1",
 		ToolName:       "delete_file",
 		Workdir:        wsDir,
 		PermissionMode: PermissionWorkspaceWrite,
+		Approved:       true,
 		Input:          map[string]any{"file_path": "."},
 	})
-	if err != nil {
-		t.Fatalf("unexpected rpc error: %v", err)
-	}
-	if !res3.IsError {
-		t.Fatalf("expected error when deleting workspace root, got %#v", res3)
+	if err == nil {
+		t.Fatalf("expected policy deny when deleting workspace root")
 	}
 }
 
@@ -372,7 +383,7 @@ func TestPermissionHardBlocks(t *testing.T) {
 		}
 	}
 
-	// workspace-write denies outside read
+	// workspace-write requires one-time approval (ask) for outside read and allows once Approved=true
 	wsOutReq := ToolExecuteRequest{
 		SessionID:      "s1",
 		ToolName:       "read",
@@ -380,8 +391,16 @@ func TestPermissionHardBlocks(t *testing.T) {
 		PermissionMode: PermissionWorkspaceWrite,
 		Input:          map[string]any{"file_path": outFile},
 	}
-	if cls := ts.ClassifyToolCall(wsOutReq); cls.Decision != DecisionDeny {
-		t.Fatalf("workspace-write must deny outside read, got %#v", cls)
+	if cls := ts.ClassifyToolCall(wsOutReq); cls.Decision != DecisionAsk {
+		t.Fatalf("workspace-write must ask for outside read, got %#v", cls)
+	}
+	if _, err := ts.ExecuteTool(wsOutReq); err == nil {
+		t.Fatalf("workspace-write outside read must fail when Approved=false")
+	}
+	wsOutApproved := wsOutReq
+	wsOutApproved.Approved = true
+	if res, err := ts.ExecuteTool(wsOutApproved); err != nil || res.IsError || !strings.Contains(res.ModelContent, "external") {
+		t.Fatalf("workspace-write outside read should succeed once Approved=true: err=%v res=%#v", err, res)
 	}
 
 	// full-access allows outside read

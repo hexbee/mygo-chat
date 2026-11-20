@@ -1,6 +1,7 @@
 import clsx from 'clsx'
-import { memo, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
+import { useChatStore } from '../../services/chat/store.js'
 import type { ClientToolStep } from '../../services/chat/view.js'
 import {
   basenameOfPath,
@@ -8,6 +9,7 @@ import {
   revealWorkspaceInFinder,
 } from '../../services/workspace/store.js'
 import { IconChevronDownOutline14, IconChevronRightOutline14 } from '../base/icons.js'
+import { ApprovalCard } from './ApprovalCard.js'
 import { DiffView } from './DiffView.js'
 import styles from './ToolCallCard.module.css'
 
@@ -23,6 +25,8 @@ const summarizeToolCall = (name: string, input: Record<string, unknown>): string
       return str('path') ? `${str('pattern')} (${str('path')})` : str('pattern')
     case 'grep':
       return str('path') ? `${str('pattern')} in ${str('path')}` : str('pattern')
+    case 'bash':
+      return str('description') || str('command')
     default:
       return ''
   }
@@ -36,18 +40,36 @@ export const ToolCallCard = memo(function ToolCallCard({
   isLast: boolean
 }) {
   const t = useTranslate()
+  const pendingApproval = useChatStore((state) =>
+    Object.hasOwn(state.pendingApprovals, step.use.id)
+      ? state.pendingApprovals[step.use.id]
+      : undefined
+  )
   const hasDiffs = Boolean(step.result?.uiMeta?.diffs?.length)
   const [expanded, setExpanded] = useState(hasDiffs)
+
+  useEffect(() => {
+    if (hasDiffs) {
+      setExpanded(true)
+    }
+  }, [hasDiffs])
+
   const summary = summarizeToolCall(step.use.name, step.use.input)
   const diffs = step.result?.uiMeta?.diffs ?? []
   const producedFiles = step.result?.uiMeta?.producedFiles ?? []
+  const exitCode = step.result?.uiMeta?.exitCode
 
-  const statusLabel =
-    step.status === 'wip'
+  const statusLabel = pendingApproval
+    ? t('toolApprovalStatusPending')
+    : step.status === 'wip'
       ? t('toolStatusRunning')
       : step.status === 'failed'
-        ? t('toolStatusFailed')
-        : t('toolStatusDone')
+        ? step.result?.uiMeta?.approvalStatus === 'rejected'
+          ? t('toolApprovalStatusRejected')
+          : t('toolStatusFailed')
+        : typeof exitCode === 'number' && exitCode !== 0
+          ? t('toolExitCode', { code: exitCode })
+          : t('toolStatusDone')
 
   const inputPreview = step.use.parseError
     ? step.use.partialJson || step.use.parseError
@@ -59,9 +81,9 @@ export const ToolCallCard = memo(function ToolCallCard({
         <span
           className={clsx(
             styles.dot,
-            step.status === 'wip' && styles.dotRunning,
-            step.status === 'done' && styles.dotDone,
-            step.status === 'failed' && styles.dotError
+            (step.status === 'wip' || pendingApproval) && styles.dotRunning,
+            !pendingApproval && step.status === 'done' && styles.dotDone,
+            !pendingApproval && step.status === 'failed' && styles.dotError
           )}
         />
       </span>
@@ -77,7 +99,13 @@ export const ToolCallCard = memo(function ToolCallCard({
               {summary}
             </span>
           ) : null}
-          <span className={clsx(styles.statusText, step.status === 'failed' && styles.statusError)}>
+          <span
+            className={clsx(
+              styles.statusText,
+              (step.status === 'failed' || (typeof exitCode === 'number' && exitCode !== 0)) &&
+                styles.statusError
+            )}
+          >
             {statusLabel}
           </span>
           <span className={styles.chevron}>
@@ -133,6 +161,7 @@ export const ToolCallCard = memo(function ToolCallCard({
           </div>
         ) : null}
       </div>
+      {pendingApproval ? <ApprovalCard approval={pendingApproval} /> : null}
     </div>
   )
 })

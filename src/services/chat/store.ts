@@ -40,6 +40,7 @@ import {
 import {
   toSessionSummary,
   type AssistantMessage,
+  type ClientToolUsePart,
   type FileAttachment,
   type Message,
   type Session,
@@ -75,6 +76,16 @@ const requestTools = (search: boolean): CreateMessageRequest['tools'] => {
 /** 允许自动补标题的请求；手动重命名后取消本轮标题写入，包含主动清空标题的情况。 */
 const titleRequests = new Set<AbortController>()
 
+export type PendingApproval = {
+  sessionId: string
+  messageId: string
+  toolUseId: string
+  toolName: string
+  input: Record<string, unknown>
+  workdir: string
+  reason: string
+}
+
 type ChatState = {
   ready: boolean
   initError: boolean
@@ -89,6 +100,8 @@ type ChatState = {
   activeId: string | null
   /** 正在生成回复的会话 */
   streaming: Record<string, AbortController>
+  /** 等待用户一次性审批的工具调用，按 toolUseId 索引 */
+  pendingApprovals: Record<string, PendingApproval>
 }
 
 export const useChatStore = create<ChatState>(() => ({
@@ -101,7 +114,71 @@ export const useChatStore = create<ChatState>(() => ({
   sessionSaveErrors: {},
   activeId: null,
   streaming: {},
+  pendingApprovals: {},
 }))
+
+const approvalResolvers = new Map<string, (approved: boolean) => void>()
+
+const settleApproval = (toolUseId: string, approved: boolean) => {
+  const resolve = approvalResolvers.get(toolUseId)
+  approvalResolvers.delete(toolUseId)
+  set((state) => {
+    if (!Object.hasOwn(state.pendingApprovals, toolUseId)) {
+      return state
+    }
+    return {
+      pendingApprovals: Object.fromEntries(
+        Object.entries(state.pendingApprovals).filter(([id]) => id !== toolUseId)
+      ),
+    }
+  })
+  resolve?.(approved)
+}
+
+export const approveToolCall = (toolUseId: string) => settleApproval(toolUseId, true)
+export const rejectToolCall = (toolUseId: string) => settleApproval(toolUseId, false)
+
+const rejectSessionApprovals = (sessionId: string) => {
+  const pending = Object.values(get().pendingApprovals).filter((item) => item.sessionId === sessionId)
+  for (const item of pending) {
+    settleApproval(item.toolUseId, false)
+  }
+}
+
+const waitForApproval = (
+  sessionId: string,
+  messageId: string,
+  call: ClientToolUsePart,
+  reason: string,
+  workdir: string,
+  signal: AbortSignal
+): Promise<boolean> => {
+  if (signal.aborted) {
+    return Promise.resolve(false)
+  }
+  return new Promise<boolean>((resolve) => {
+    const onAbort = () => settleApproval(call.id, false)
+    approvalResolvers.set(call.id, (approved) => {
+      signal.removeEventListener('abort', onAbort)
+      resolve(approved)
+    })
+    signal.addEventListener('abort', onAbort, { once: true })
+    set((state) => ({
+      pendingApprovals: {
+        ...state.pendingApprovals,
+        [call.id]: {
+          sessionId,
+          messageId,
+          toolUseId: call.id,
+          toolName: call.name,
+          input: call.input,
+          workdir,
+          reason,
+        },
+      },
+    }))
+  })
+}
 
 const { getState: get, setState: set } = useChatStore
 
@@ -662,6 +739,7 @@ const removeSessionData = async (
 }
 
 export const stopReply = (sessionId: string) => {
+  rejectSessionApprovals(sessionId)
   getStreamController(sessionId)?.abort()
   void ToolService.cancelSessionTools(sessionId).catch(() => {})
 }
@@ -1207,6 +1285,8 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
               getWorkdir: () => getSessionWorkdir(sessionId),
               permissionMode: getSessionAgentContext(sessionId).permissionMode,
               signal: controller.signal,
+              requestApproval: (call, reason, workdir) =>
+                waitForApproval(sessionId, reply.id, call, reason, workdir, controller.signal),
               onAssignedScratch: (scratchDir) => {
                 updateSession(sessionId, (session) =>
                   session.scratchDir === scratchDir ? session : { ...session, scratchDir }

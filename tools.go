@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 )
@@ -17,7 +16,7 @@ const (
 	DecisionDeny  = "deny"
 )
 
-// ToolService exposes Go-native file (and later shell) tools to the frontend via mygo.Bind.
+// ToolService exposes Go-native file and shell tools to the frontend via mygo.Bind.
 type ToolService struct {
 	mu      sync.Mutex
 	nextID  uint64
@@ -46,7 +45,7 @@ type ToolExecuteRequest struct {
 	SessionID      string         `json:"sessionId"`
 	ToolName       string         `json:"toolName"` // read | write | edit | delete_file | glob | grep | bash
 	Input          map[string]any `json:"input"`
-	Workdir        string         `json:"workdir"`        // User workspace or existing scratchDir; empty triggers lazy scratch on write/edit
+	Workdir        string         `json:"workdir"`        // User workspace or existing scratchDir; empty triggers lazy scratch on write/edit/bash
 	PermissionMode string         `json:"permissionMode"` // read-only | workspace-write | full-access
 	Approved       bool           `json:"approved"`       // True only after one-time user approval; backend still re-verifies
 }
@@ -66,6 +65,11 @@ func normalizePermissionMode(mode string) string {
 	default:
 		return PermissionWorkspaceWrite
 	}
+}
+
+func allowOutsideForRequest(req ToolExecuteRequest) bool {
+	perm := normalizePermissionMode(req.PermissionMode)
+	return perm == PermissionFullAccess || (perm == PermissionWorkspaceWrite && req.Approved)
 }
 
 func isWriteFileTool(name string) bool {
@@ -133,80 +137,23 @@ func boolInput(m map[string]any, key string) bool {
 	return ok && b
 }
 
-// ClassifyToolCall performs pre-execution policy enforcement for file tools.
-// In Phase 1 M2, this enforces fail-closed hard blocks:
-//   - read-only denies all write/edit/delete_file calls and out-of-workspace paths
-//   - workspace-write denies out-of-workspace paths (upgraded to ask in M4)
-//   - full-access allows cross-directory file operations
+// ClassifyToolCall performs pre-execution policy enforcement for file and shell tools.
+//   - read-only: allows read/glob/grep inside workspace & strict read-only bash allowlist; denies everything else
+//   - workspace-write: allows workspace file ops & strict read-only bash; upgrades out-of-workspace file ops and non-read-only bash to ask
+//   - full-access: allows cross-directory ops & standard commands; keeps ask for high-risk deletions/commands
 func (s *ToolService) ClassifyToolCall(req ToolExecuteRequest) ToolClassifyResult {
 	perm := normalizePermissionMode(req.PermissionMode)
 
-	if !isReadFileTool(req.ToolName) && !isWriteFileTool(req.ToolName) {
-		return ToolClassifyResult{
-			Decision: DecisionDeny,
-			Reason:   fmt.Sprintf("unsupported tool: %s", req.ToolName),
-		}
+	if req.ToolName == "bash" {
+		return classifyBashToolCall(req, perm)
 	}
-
-	if perm == PermissionReadOnly && isWriteFileTool(req.ToolName) {
-		return ToolClassifyResult{
-			Decision: DecisionDeny,
-			Reason:   fmt.Sprintf("tool %q is not allowed in read-only mode", req.ToolName),
-		}
+	if isReadFileTool(req.ToolName) || isWriteFileTool(req.ToolName) {
+		return classifyFileToolCall(req, perm)
 	}
-
-	allowOutside := perm == PermissionFullAccess
-	root, _, err := resolveRootForRequest(req, false)
-	if err != nil {
-		return ToolClassifyResult{
-			Decision: DecisionDeny,
-			Reason:   err.Error(),
-		}
+	return ToolClassifyResult{
+		Decision: DecisionDeny,
+		Reason:   fmt.Sprintf("unsupported tool: %s", req.ToolName),
 	}
-
-	rawPath := extractTargetPath(req)
-	if rawPath == "" {
-		// glob and grep default to workspace root when path is omitted.
-		if req.ToolName == "glob" || req.ToolName == "grep" {
-			if root == "" {
-				return ToolClassifyResult{
-					Decision: DecisionDeny,
-					Reason:   fmt.Sprintf("tool %q requires an active workspace or explicit path", req.ToolName),
-				}
-			}
-			return ToolClassifyResult{Decision: DecisionAllow}
-		}
-		// Let ExecuteTool return a structured parameter error for missing file_path.
-		return ToolClassifyResult{Decision: DecisionAllow}
-	}
-
-	followLeaf := req.ToolName != "delete_file"
-	_, withinRoot, err := resolveAndValidatePath(rawPath, root, allowOutside, followLeaf)
-	if err != nil {
-		if errors.Is(err, errPathOutsideWorkspace) || errors.Is(err, errBrokenSymlink) {
-			return ToolClassifyResult{
-				Decision: DecisionDeny,
-				Reason:   err.Error(),
-			}
-		}
-		if root == "" && !allowOutside {
-			return ToolClassifyResult{
-				Decision: DecisionDeny,
-				Reason:   err.Error(),
-			}
-		}
-		// Other path syntax/missing-root errors are surfaced cleanly during ExecuteTool.
-		return ToolClassifyResult{Decision: DecisionAllow}
-	}
-
-	if !allowOutside && !withinRoot {
-		return ToolClassifyResult{
-			Decision: DecisionDeny,
-			Reason:   fmt.Sprintf("path %q is outside the allowed workspace", rawPath),
-		}
-	}
-
-	return ToolClassifyResult{Decision: DecisionAllow}
 }
 
 func extractTargetPath(req ToolExecuteRequest) string {
@@ -255,6 +202,8 @@ func (s *ToolService) ExecuteTool(req ToolExecuteRequest) (ToolExecuteResult, er
 		return executeGlob(ctx, req)
 	case "grep":
 		return executeGrep(ctx, req)
+	case "bash":
+		return executeBash(ctx, req)
 	default:
 		return ToolExecuteResult{
 			ModelContent: fmt.Sprintf("Unsupported tool: %s", req.ToolName),
@@ -263,7 +212,7 @@ func (s *ToolService) ExecuteTool(req ToolExecuteRequest) (ToolExecuteResult, er
 	}
 }
 
-// CancelSessionTools cancels all active tool executions belonging to sessionID.
+// CancelSessionTools cancels all active tool executions (including running bash process groups) for sessionID.
 func (s *ToolService) CancelSessionTools(sessionID string) error {
 	s.mu.Lock()
 	active := s.cancels[sessionID]

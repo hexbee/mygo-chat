@@ -33,7 +33,7 @@ export interface ToolExecuteRequest {
   /** read | write | edit | delete_file | glob | grep | bash */
   toolName: string;
   input: Record<string, unknown>;
-  /** User workspace or existing scratchDir; empty triggers lazy scratch on write/edit */
+  /** User workspace or existing scratchDir; empty triggers lazy scratch on write/edit/bash */
   workdir: string;
   /** read-only | workspace-write | full-access */
   permissionMode: string;
@@ -114,18 +114,17 @@ export const WorkspaceService = {
   },
 } as const;
 
-/** ToolService exposes Go-native file (and later shell) tools to the frontend via mygo.Bind. */
+/** ToolService exposes Go-native file and shell tools to the frontend via mygo.Bind. */
 export const ToolService = {
-  /** CancelSessionTools cancels all active tool executions belonging to sessionID. */
+  /** CancelSessionTools cancels all active tool executions (including running bash process groups) for sessionID. */
   cancelSessionTools(sessionID: string): Promise<void> {
     return call("ToolService.CancelSessionTools", sessionID);
   },
   /**
-   * ClassifyToolCall performs pre-execution policy enforcement for file tools.
-   * In Phase 1 M2, this enforces fail-closed hard blocks:
-   *   - read-only denies all write/edit/delete_file calls and out-of-workspace paths
-   *   - workspace-write denies out-of-workspace paths (upgraded to ask in M4)
-   *   - full-access allows cross-directory file operations
+   * ClassifyToolCall performs pre-execution policy enforcement for file and shell tools.
+   *   - read-only: allows read/glob/grep inside workspace & strict read-only bash allowlist; denies everything else
+   *   - workspace-write: allows workspace file ops & strict read-only bash; upgrades out-of-workspace file ops and non-read-only bash to ask
+   *   - full-access: allows cross-directory ops & standard commands; keeps ask for high-risk deletions/commands
    */
   classifyToolCall(req: ToolExecuteRequest): Promise<ToolClassifyResult> {
     return call("ToolService.ClassifyToolCall", req);

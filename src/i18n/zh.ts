@@ -236,4 +236,12 @@ export const zh = {
   toolOpenFile: '打开文件',
   toolProducedFilesTitle: '已生成/修改的文件',
   toolDiffTruncated: '还有 {count} 行未展开',
+  toolApprovalTitle: '需要一次性审批',
+  toolApprovalWorkdir: '工作目录',
+  toolApprovalAllowOnce: '允许这一次',
+  toolApprovalReject: '拒绝',
+  toolApprovalStatusPending: '等待审批',
+  toolApprovalStatusApproved: '已允许',
+  toolApprovalStatusRejected: '已拒绝',
+  toolExitCode: '退出码 {code}',
 } as const

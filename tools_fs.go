@@ -55,8 +55,7 @@ func executeRead(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 		return toolErrorResult("Error: file_path is required", req.Workdir)
 	}
 
-	perm := normalizePermissionMode(req.PermissionMode)
-	allowOutside := perm == PermissionFullAccess
+	allowOutside := allowOutsideForRequest(req)
 	root, _, err := resolveRootForRequest(req, false)
 	if err != nil {
 		return toolErrorResult("Error: "+err.Error(), req.Workdir)
@@ -193,8 +192,7 @@ func executeWrite(_ context.Context, req ToolExecuteRequest) (ToolExecuteResult,
 		return toolErrorResult("Error: content must be a string", req.Workdir)
 	}
 
-	perm := normalizePermissionMode(req.PermissionMode)
-	allowOutside := perm == PermissionFullAccess
+	allowOutside := allowOutsideForRequest(req)
 
 	// Pre-validate against candidate root BEFORE creating any scratch directory.
 	candidateRoot, _, err := resolveRootForRequest(req, false)
@@ -278,8 +276,7 @@ func executeEdit(_ context.Context, req ToolExecuteRequest) (ToolExecuteResult, 
 	}
 	replaceAll := boolInput(req.Input, "replace_all")
 
-	perm := normalizePermissionMode(req.PermissionMode)
-	allowOutside := perm == PermissionFullAccess
+	allowOutside := allowOutsideForRequest(req)
 
 	root, _, err := resolveRootForRequest(req, false)
 	if err != nil {
@@ -377,8 +374,7 @@ func executeDeleteFile(_ context.Context, req ToolExecuteRequest) (ToolExecuteRe
 		return toolErrorResult("Error: file_path is required", req.Workdir)
 	}
 
-	perm := normalizePermissionMode(req.PermissionMode)
-	allowOutside := perm == PermissionFullAccess
+	allowOutside := allowOutsideForRequest(req)
 	root, _, err := resolveRootForRequest(req, false)
 	if err != nil {
 		return toolErrorResult("Error: "+err.Error(), req.Workdir)
@@ -421,8 +417,7 @@ func executeGlob(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 		return toolErrorResult("Error: pattern is required", req.Workdir)
 	}
 
-	perm := normalizePermissionMode(req.PermissionMode)
-	allowOutside := perm == PermissionFullAccess
+	allowOutside := allowOutsideForRequest(req)
 	root, _, err := resolveRootForRequest(req, false)
 	if err != nil {
 		return toolErrorResult("Error: "+err.Error(), req.Workdir)
@@ -545,8 +540,7 @@ func executeGrep(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 
 	include := filepath.ToSlash(strings.TrimSpace(stringInput(req.Input, "include")))
 
-	perm := normalizePermissionMode(req.PermissionMode)
-	allowOutside := perm == PermissionFullAccess
+	allowOutside := allowOutsideForRequest(req)
 	root, _, err := resolveRootForRequest(req, false)
 	if err != nil {
 		return toolErrorResult("Error: "+err.Error(), req.Workdir)
