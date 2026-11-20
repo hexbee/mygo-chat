@@ -236,4 +236,13 @@ export const en = {
   modelV4ProDesc: 'Stronger reasoning and complex coding capability',
   modelThinkingShort: 'Think',
   modelThinkingDesc: 'Think step-by-step before answering',
+  toolRunningTitle: 'Running tool',
+  toolStatusRunning: 'Running...',
+  toolStatusDone: 'Done',
+  toolStatusFailed: 'Failed',
+  toolInputLabel: 'Arguments',
+  toolOutputLabel: 'Output',
+  toolOpenFile: 'Open file',
+  toolProducedFilesTitle: 'Created / Modified Files',
+  toolDiffTruncated: '{count} more lines not shown',
 } satisfies Record<keyof typeof zh, string>

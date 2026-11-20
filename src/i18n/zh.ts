@@ -227,4 +227,13 @@ export const zh = {
   modelV4ProDesc: '更强推理与复杂代码任务能力',
   modelThinkingShort: '思考',
   modelThinkingDesc: '开启后模型先进行深度推理再作答',
+  toolRunningTitle: '正在调用工具',
+  toolStatusRunning: '执行中...',
+  toolStatusDone: '已完成',
+  toolStatusFailed: '失败',
+  toolInputLabel: '参数',
+  toolOutputLabel: '输出',
+  toolOpenFile: '打开文件',
+  toolProducedFilesTitle: '已生成/修改的文件',
+  toolDiffTruncated: '还有 {count} 行未展开',
 } as const

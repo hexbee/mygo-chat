@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { WorkspaceService } from '../../mygo.js'
+import { ToolService, WorkspaceService } from '../../mygo.js'
 import { createId } from '../../utils/id.js'
 import { ApiError, streamMessage } from '../api/client.js'
 import type { CreateMessageRequest, ReasoningEffort } from '../api/types.js'
@@ -13,6 +13,12 @@ import {
   useWorkspaceStore,
 } from '../workspace/store.js'
 import type { PermissionMode } from '../workspace/types.js'
+import {
+  buildAgentSystemPrompt,
+  CLIENT_FILE_TOOLS,
+  executeClientToolCalls,
+  type AgentWorkspaceContext,
+} from './agentTools.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
@@ -27,6 +33,7 @@ import {
   applyEvent,
   canContinueReply,
   getContextRounds,
+  getUnsettledToolUses,
   settleReply,
   toRequestMessages,
 } from './reply.js'
@@ -50,15 +57,18 @@ const SAFETY_CHECK = { level: 'high' } as const
 const FILE_RETRY_LIMIT = 2
 /** 退避基数，第 n 次重试等待 2^n 倍；连续失败达到上限就放弃，把原始报错展示出来 */
 const FILE_RETRY_BASE_DELAY = 1000
+/** 单轮 Agent Loop 最大工具往返步数，防止死循环 */
+const MAX_AGENT_STEPS = 25
 
-/** 阅读链接始终开启，智能搜索开关控制是否另行声明搜索工具（含边想边搜）。 */
-const serverTools = (search: boolean): CreateMessageRequest['tools'] => {
+/** 阅读链接始终开启，智能搜索开关控制是否另行声明搜索工具，同时挂载客户端内置文件工具。 */
+const requestTools = (search: boolean): CreateMessageRequest['tools'] => {
   const tools: CreateMessageRequest['tools'] = [
     { type: 'deepseek_read_url', name: 'deepseek_read_url' },
   ]
   if (search) {
     tools.push({ type: 'deepseek_web_search', name: 'deepseek_web_search' })
   }
+  tools.push(...CLIENT_FILE_TOOLS)
   return tools
 }
 
@@ -651,7 +661,10 @@ const removeSessionData = async (
   }
 }
 
-export const stopReply = (sessionId: string) => getStreamController(sessionId)?.abort()
+export const stopReply = (sessionId: string) => {
+  getStreamController(sessionId)?.abort()
+  void ToolService.cancelSessionTools(sessionId).catch(() => {})
+}
 
 /**
  * 提交指定会话的最新草稿；null 表示新建会话。
@@ -1079,6 +1092,23 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
  * 补传失败时回复记为 upload 错误，可重试。
  * 服务端判定 file_id 失效时重新补传后重发，退避重试且次数有上限，超过则按原始报错收尾。
  */
+const getSessionAgentContext = (sessionId: string): AgentWorkspaceContext => {
+  const session = getSession(sessionId)
+  const workspace = session?.workspaceId
+    ? useWorkspaceStore.getState().workspaces.find((w) => w.id === session.workspaceId)
+    : undefined
+  return {
+    workspacePath: workspace?.path ?? null,
+    scratchDir: session?.scratchDir ?? null,
+    permissionMode: session?.permissionMode ?? 'workspace-write',
+  }
+}
+
+const getSessionWorkdir = (sessionId: string): string => {
+  const ctx = getSessionAgentContext(sessionId)
+  return ctx.workspacePath ?? ctx.scratchDir ?? ''
+}
+
 const streamReply = async (sessionId: string, initial: AssistantMessage, request: Request) => {
   const controller = new AbortController()
   if (!getSession(sessionId)?.title) {
@@ -1109,52 +1139,98 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         reply = { ...reply, latestReminder }
         updateReply(sessionId, reply)
         persist(sessionId)
-        const messages = toRequestMessages(
-          prepared.history,
-          prepared.question,
-          prepared.prefix,
-          initial.thinking ?? false,
-          latestReminder
-        )
         const effort: ReasoningEffort =
           initial.reasoningEffort ?? (initial.thinking ? 'high' : 'off')
-        const events = streamMessage(
-          useSettings.getState().apiKey ?? '',
-          {
-            model: initial.model ?? useSettings.getState().model,
-            system: SYSTEM_PROMPT,
-            messages,
-            thinking: { type: effort === 'off' ? 'disabled' : 'enabled' },
-            ...(effort === 'off' ? {} : { output_config: { effort } }),
-            safety_check: SAFETY_CHECK,
-            tools: serverTools(initial.search ?? false),
-            ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
-          },
-          controller.signal
-        )
-        const blockIndexes = new Map<number, number>()
-        for await (const event of events) {
-          receivedContent ||= event.type === 'content_block_start'
+        const thinkingEnabled = effort !== 'off'
+
+        for (let step = 0; step < MAX_AGENT_STEPS; step += 1) {
+          const messages = toRequestMessages(
+            prepared.history,
+            prepared.question,
+            step === 0 ? prepared.prefix : undefined,
+            thinkingEnabled,
+            latestReminder,
+            step > 0 ? reply : undefined
+          )
+          const agentCtx = getSessionAgentContext(sessionId)
+          const events = streamMessage(
+            useSettings.getState().apiKey ?? '',
+            {
+              model: initial.model ?? useSettings.getState().model,
+              system: buildAgentSystemPrompt(SYSTEM_PROMPT, agentCtx),
+              messages,
+              thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' },
+              ...(thinkingEnabled ? { output_config: { effort } } : {}),
+              safety_check: SAFETY_CHECK,
+              tools: requestTools(initial.search ?? false),
+              ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
+            },
+            controller.signal
+          )
+          const blockIndexes = new Map<number, number>()
+          for await (const event of events) {
+            receivedContent ||= event.type === 'content_block_start'
+            if (
+              event.type === 'message_delta' &&
+              (event.delta.stop_reason === 'end_turn' ||
+                event.delta.stop_reason === 'max_tokens' ||
+                event.delta.stop_reason === 'tool_use') &&
+              event.delta.title?.trim() &&
+              titleRequests.has(controller) &&
+              !controller.signal.aborted &&
+              !get().importingHistory
+            ) {
+              const title = event.delta.title.trim()
+              updateSession(sessionId, (session) =>
+                session.title ? session : { ...session, title }
+              )
+              titleRequests.delete(controller)
+            }
+            reply = applyEvent(reply, event, Date.now(), blockIndexes)
+            if (document.visibilityState === 'hidden') {
+              flush()
+            } else {
+              frame ||= requestAnimationFrame(flush)
+            }
+          }
+          flush()
+
+          const unsettled = getUnsettledToolUses(reply)
           if (
-            event.type === 'message_delta' &&
-            (event.delta.stop_reason === 'end_turn' || event.delta.stop_reason === 'max_tokens') &&
-            event.delta.title?.trim() &&
-            titleRequests.has(controller) &&
+            reply.stopReason === 'tool_use' &&
+            unsettled.length > 0 &&
             !controller.signal.aborted &&
-            !get().importingHistory
+            step + 1 < MAX_AGENT_STEPS
           ) {
-            const title = event.delta.title.trim()
-            updateSession(sessionId, (session) => (session.title ? session : { ...session, title }))
-            titleRequests.delete(controller)
-          }
-          reply = applyEvent(reply, event, Date.now(), blockIndexes)
-          if (document.visibilityState === 'hidden') {
+            const toolResults = await executeClientToolCalls(unsettled, {
+              sessionId,
+              getWorkdir: () => getSessionWorkdir(sessionId),
+              permissionMode: getSessionAgentContext(sessionId).permissionMode,
+              signal: controller.signal,
+              onAssignedScratch: (scratchDir) => {
+                updateSession(sessionId, (session) =>
+                  session.scratchDir === scratchDir ? session : { ...session, scratchDir }
+                )
+                persist(sessionId)
+              },
+            })
+            reply = {
+              ...reply,
+              stopReason: undefined,
+              blocks: [...reply.blocks, ...toolResults],
+            }
             flush()
-          } else {
-            frame ||= requestAnimationFrame(flush)
+            persist(sessionId)
+            if (controller.signal.aborted) {
+              reply = settleReply(reply, 'stopped', Date.now())
+              break
+            }
+            continue
           }
+
+          reply = settleReply(reply, 'done', Date.now())
+          break
         }
-        reply = settleReply(reply, 'done', Date.now())
         break
       } catch (error) {
         if (controller.signal.aborted) {

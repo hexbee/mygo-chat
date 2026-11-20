@@ -1,0 +1,203 @@
+.wrapper {
+  position: relative;
+  padding: 4px 0 4px 22px;
+}
+
+.withLine::after {
+  content: '';
+  position: absolute;
+  left: 7.5px;
+  top: 28px;
+  width: 1px;
+  height: calc(100% - 20px);
+  background-color: var(--dsw-alias-label-dimmed);
+}
+
+.statusDot {
+  position: absolute;
+  top: 10px;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--dsw-alias-label-tertiary);
+}
+
+.dotRunning {
+  background-color: var(--dsw-alias-brand-primary);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.dotDone {
+  background-color: #16a34a;
+}
+
+.dotError {
+  background-color: var(--dsw-alias-state-error-primary);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 1;
+  }
+}
+
+.card {
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background-color: var(--dsw-alias-bg-base);
+  overflow: hidden;
+  transition: border-color 0.2s;
+
+  &:hover {
+    border-color: var(--dsw-alias-border-l1, var(--dsw-alias-border-l2));
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-markdown-small);
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.toolName {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background-color: var(--dsw-alias-markdown-tag);
+  color: var(--dsw-alias-label-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.statusText {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.statusError {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.body {
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  font-size: 12px;
+}
+
+.sectionLabel {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background-color: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.preError {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.fileActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.fileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background-color: var(--dsw-alias-bg-base);
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.fileChipName {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.fileChipBtn {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 5px;
+  background-color: var(--dsw-alias-markdown-tag);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--dsw-alias-label-primary);
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}

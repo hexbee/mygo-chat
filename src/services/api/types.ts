@@ -149,18 +149,38 @@ export type WebSearchToolResultBlockParam = WebSearchToolResultBlock
 /** 只回传 read_link 结果；成功时原样保留 signature，供服务端解密恢复网页上下文 */
 export type WebFetchToolResultBlockParam = WebFetchToolResultBlock
 
+/** 客户端工具调用参数块（在 assistant 消息中回传） */
+export type ToolUseBlockParam = {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+/** 客户端工具执行结果参数块（在 user 消息中回传） */
+export type ToolResultBlockParam = {
+  type: 'tool_result'
+  tool_use_id: string
+  content: string
+  is_error?: boolean
+}
+
 export type AssistantBlockParam =
   | TextBlockParam
   | ThinkingBlock
   | ServerToolUseBlockParam
   | WebSearchToolResultBlockParam
   | WebFetchToolResultBlockParam
+  | ToolUseBlockParam
 
 /** 末尾 assistant 自动触发继续生成，无需 prefix 字段 */
 export type MessageParam =
   /** Chat Engine 扩展角色，位于对应 user 前；需服务端支持 latest_reminder。 */
   | { role: 'latest_reminder'; content: string }
-  | { role: 'user'; content: string | (FileBlockParam | TextBlockParam)[] }
+  | {
+      role: 'user'
+      content: string | (FileBlockParam | TextBlockParam | ToolResultBlockParam)[]
+    }
   | { role: 'assistant'; content: AssistantBlockParam[] }
 
 /** 开启联网搜索与边想边搜 */
@@ -175,13 +195,20 @@ export type DeepseekReadUrlTool = {
   name: 'deepseek_read_url'
 }
 
+/** 客户端自定义工具声明 */
+export type ClientToolDefinition = {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+}
+
 export type CreateMessageRequest = {
   model: ChatModel
   system: string
   messages: MessageParam[]
   thinking: { type: 'enabled' | 'disabled' }
   output_config?: { effort: Exclude<ReasoningEffort, 'off'> }
-  tools: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
+  tools: (DeepseekWebSearchTool | DeepseekReadUrlTool | ClientToolDefinition)[]
   safety_check: { level: 'high' }
   title?: { enabled: boolean }
 }

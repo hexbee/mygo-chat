@@ -6,6 +6,11 @@ import { describeReply } from '../../services/chat/describe.js'
 import { canContinueReply } from '../../services/chat/reply.js'
 import { continueReply, regenerateReply } from '../../services/chat/store.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
+import {
+  basenameOfPath,
+  openWorkspacePath,
+  revealWorkspaceInFinder,
+} from '../../services/workspace/store.js'
 import type { AssistantMessage as AssistantMessageType } from '../../services/chat/types.js'
 import { openSettings } from '../settings/settingsDialogState.js'
 import { IconButton } from '../base/IconButton.js'
@@ -122,6 +127,36 @@ export const AssistantMessage = memo(function AssistantMessage({
               </>
             ) : null}
           </span>
+        </div>
+      ) : null}
+      {!streaming && !refused && view.producedFiles.length > 0 ? (
+        <div className={styles.producedFiles}>
+          <div className={styles.producedFilesTitle}>{t('toolProducedFilesTitle')}</div>
+          <div className={styles.producedFileList}>
+            {view.producedFiles.map((filePath) => (
+              <div key={filePath} className={styles.producedFileChip} title={filePath}>
+                <span className={styles.producedFileName}>{basenameOfPath(filePath)}</span>
+                <button
+                  type="button"
+                  className={styles.producedFileBtn}
+                  onClick={() => {
+                    void openWorkspacePath(filePath)
+                  }}
+                >
+                  {t('toolOpenFile')}
+                </button>
+                <button
+                  type="button"
+                  className={styles.producedFileBtn}
+                  onClick={() => {
+                    void revealWorkspaceInFinder(filePath)
+                  }}
+                >
+                  {t('workspaceRevealInFinder')}
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
       {!streaming && !refused && view.searchResults.length > 0 ? (

@@ -6,7 +6,12 @@ import type {
   WebSearchResult,
   WebSearchToolResultBlock,
 } from '../api/types.js'
-import type { AssistantMessage, ThinkingPart } from './types.js'
+import type {
+  AssistantMessage,
+  ClientToolResultPart,
+  ClientToolUsePart,
+  ThinkingPart,
+} from './types.js'
 
 /**
  * 由回复的内容块推导界面需要的结构：思考与工具步骤的时间线、带引用角标的正文、可引用的来源列表。
@@ -66,7 +71,23 @@ export type ThinkingStep = { type: 'thinking'; key: string; blocks: ThinkingPart
 /** 工具调用前输出的说明文字 */
 export type PreambleStep = { type: 'text'; key: string; markdown: string }
 
-export type Step = SearchStep | OpenStep | FindStep | ReadLinkStep | ThinkingStep | PreambleStep
+/** 客户端文件工具调用步骤 */
+export type ClientToolStep = {
+  type: 'client_tool'
+  key: string
+  use: ClientToolUsePart
+  result?: ClientToolResultPart
+  status: ToolStatus
+}
+
+export type Step =
+  | SearchStep
+  | OpenStep
+  | FindStep
+  | ReadLinkStep
+  | ThinkingStep
+  | PreambleStep
+  | ClientToolStep
 
 export type ReplyView = {
   steps: Step[]
@@ -76,6 +97,8 @@ export type ReplyView = {
   sources: Source[]
   /** 搜索到的网页（去重），用于底部汇总与搜索结果列表 */
   searchResults: Source[]
+  /** 本条回复由客户端工具产出或修改的文件路径（去重） */
+  producedFiles: string[]
 }
 
 export const getSiteName = (url: string) => {
@@ -175,9 +198,20 @@ const joinTextBlocks = (
 
 export const buildReplyView = (reply: AssistantMessage, streaming: boolean): ReplyView => {
   const results = new Map<string, WebSearchToolResultBlock | WebFetchToolResultBlock>()
+  const clientResults = new Map<string, ClientToolResultPart>()
+  const producedFiles: string[] = []
+  const seenProducedFiles = new Set<string>()
   for (const block of reply.blocks) {
     if (block.type === 'web_search_tool_result' || block.type === 'web_fetch_tool_result') {
       results.set(block.tool_use_id, block)
+    } else if (block.type === 'client_tool_result') {
+      clientResults.set(block.tool_use_id, block)
+      for (const filePath of block.uiMeta?.producedFiles ?? []) {
+        if (!seenProducedFiles.has(filePath)) {
+          seenProducedFiles.add(filePath)
+          producedFiles.push(filePath)
+        }
+      }
     }
   }
 
@@ -244,6 +278,25 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
         mergedThinking = { type: 'thinking', key: `thinking-${index}`, blocks: [block] }
         steps.push(mergedThinking)
       }
+      return
+    }
+    if (block.type === 'client_tool_use') {
+      flushPreamble()
+      const result = clientResults.get(block.id)
+      const status: ToolStatus = !result
+        ? streaming
+          ? 'wip'
+          : 'failed'
+        : result.isError
+          ? 'failed'
+          : 'done'
+      steps.push({
+        type: 'client_tool',
+        key: block.id,
+        use: block,
+        result,
+        status,
+      })
       return
     }
     if (block.type !== 'server_tool_use') {
@@ -343,6 +396,7 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
     answer: answer && answer.text ? answer : null,
     sources: registry.list,
     searchResults,
+    producedFiles,
   }
 }
 
@@ -384,6 +438,9 @@ export const getAreaTitle = (
     return translate('messageThinkStopped')
   }
   const last = view.steps.at(-1)
+  if (last?.type === 'client_tool' && last.status === 'wip') {
+    return translate('toolRunningTitle')
+  }
   if (last?.type === 'search' && last.status === 'wip') {
     return translate(isImageSearchKind(last.kind) ? 'imageSearching' : 'deepSearchSearching')
   }
