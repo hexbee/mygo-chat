@@ -97,6 +97,21 @@ func (FileService) OpenFile() (*FileOpenResult, error) {
 	}, nil
 }
 
+// MenuAction represents an action triggered from the native application menu or its shortcuts.
+type MenuAction string
+
+const (
+	MenuActionCheckUpdate   MenuAction = "check-update"
+	MenuActionOpenSettings  MenuAction = "open-settings"
+	MenuActionNewChat       MenuAction = "new-chat"
+	MenuActionSearchChats   MenuAction = "search-chats"
+	MenuActionToggleSidebar MenuAction = "toggle-sidebar"
+)
+
+// MenuActionEvent delivers native menu and shortcut actions to the page asynchronously,
+// avoiding synchronous Page.Eval re-entrancy deadlocks inside Windows WebView2's AcceleratorKeyPressed handler.
+var MenuActionEvent = mygo.NewEvent[MenuAction]("menu:action")
+
 func setupMenu(win *mygo.Window) {
 	isZh := strings.HasPrefix(strings.ToLower(os.Getenv("LANG")), "zh")
 
@@ -118,6 +133,18 @@ func setupMenu(win *mygo.Window) {
 		toggleSidebarLabel = "切换侧边栏"
 	}
 
+	emitAction := func(action MenuAction) func(item *mygo.MenuItem, w *mygo.Window) {
+		return func(item *mygo.MenuItem, w *mygo.Window) {
+			target := w
+			if target == nil {
+				target = win
+			}
+			if target != nil {
+				_ = MenuActionEvent.Emit(target, action)
+			}
+		}
+	}
+
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{
 			Role: mygo.RoleAppMenu,
@@ -125,21 +152,13 @@ func setupMenu(win *mygo.Window) {
 				{Role: mygo.RoleAbout},
 				{
 					Label: checkUpdateLabel,
-					Click: func(item *mygo.MenuItem, w *mygo.Window) {
-						if win != nil && win.Page() != nil {
-							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:check-update'))")
-						}
-					},
+					Click: emitAction(MenuActionCheckUpdate),
 				},
 				mygo.Separator(),
 				{
 					Label:       preferencesLabel,
 					Accelerator: "CmdOrCtrl+,",
-					Click: func(item *mygo.MenuItem, w *mygo.Window) {
-						if win != nil && win.Page() != nil {
-							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:open-settings'))")
-						}
-					},
+					Click:       emitAction(MenuActionOpenSettings),
 				},
 				mygo.Separator(),
 				{Role: mygo.RoleServices},
@@ -157,20 +176,12 @@ func setupMenu(win *mygo.Window) {
 				{
 					Label:       newChatLabel,
 					Accelerator: "CmdOrCtrl+N",
-					Click: func(item *mygo.MenuItem, w *mygo.Window) {
-						if win != nil && win.Page() != nil {
-							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:new-chat'))")
-						}
-					},
+					Click:       emitAction(MenuActionNewChat),
 				},
 				{
 					Label:       searchChatsLabel,
 					Accelerator: "CmdOrCtrl+K",
-					Click: func(item *mygo.MenuItem, w *mygo.Window) {
-						if win != nil && win.Page() != nil {
-							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:search-chats'))")
-						}
-					},
+					Click:       emitAction(MenuActionSearchChats),
 				},
 				mygo.Separator(),
 				{Role: mygo.RoleClose},
@@ -183,11 +194,7 @@ func setupMenu(win *mygo.Window) {
 				{
 					Label:       toggleSidebarLabel,
 					Accelerator: "CmdOrCtrl+B",
-					Click: func(item *mygo.MenuItem, w *mygo.Window) {
-						if win != nil && win.Page() != nil {
-							_, _ = win.Page().Eval("window.dispatchEvent(new CustomEvent('mygo:toggle-sidebar'))")
-						}
-					},
+					Click:       emitAction(MenuActionToggleSidebar),
 				},
 				mygo.Separator(),
 				{Role: mygo.RoleReload},

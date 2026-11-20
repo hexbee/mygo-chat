@@ -1,4 +1,6 @@
 import { useEffect } from 'react'
+import { isMyGo } from 'mygo-runtime'
+import { events, type MenuAction } from '../mygo.js'
 import { newChat } from '../services/chat/store.js'
 import { setSiderCollapsed, useSettings } from '../services/settings.js'
 import {
@@ -6,7 +8,7 @@ import {
   openSettings,
   useSettingsDialog,
 } from '../components/settings/settingsDialogState.js'
-import { openChatSearch, toggleChatSearch } from '../components/chatSearch/chatSearchState.js'
+import { toggleChatSearch } from '../components/chatSearch/chatSearchState.js'
 import { useUpdateStore } from '../services/updater/updateStore.js'
 import { showToast } from '../components/base/toastState.js'
 
@@ -26,6 +28,35 @@ export const modKey = isMac ? '⌘' : 'Ctrl+'
  */
 export const useGlobalShortcuts = () => {
   useEffect(() => {
+    const toggleSettings = () => {
+      if (useSettingsDialog.getState().open) {
+        closeSettings()
+      } else {
+        openSettings('general')
+      }
+    }
+
+    const toggleSidebar = () => {
+      const current = useSettings.getState().siderCollapsed
+      setSiderCollapsed(!current)
+    }
+
+    const checkUpdate = () => {
+      useUpdateStore
+        .getState()
+        .checkUpdate()
+        .then((res) => {
+          if (res.phase === 'available' || res.phase === 'ready') {
+            useUpdateStore.getState().openDialog()
+          } else if (res.phase === 'idle') {
+            showToast('当前已是最新版本')
+          }
+        })
+        .catch(() => {
+          showToast('检查更新失败')
+        })
+    }
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing) {
         return
@@ -55,66 +86,44 @@ export const useGlobalShortcuts = () => {
       // Cmd/Ctrl + ,: 打开/关闭设置
       if (e.key === ',' && !e.shiftKey) {
         e.preventDefault()
-        if (useSettingsDialog.getState().open) {
-          closeSettings()
-        } else {
-          openSettings('general')
-        }
+        toggleSettings()
         return
       }
 
       // Cmd/Ctrl + B: 切换侧边栏展开/收起
       if (key === 'b' && !e.shiftKey) {
         e.preventDefault()
-        const current = useSettings.getState().siderCollapsed
-        setSiderCollapsed(!current)
+        toggleSidebar()
         return
       }
     }
 
-    const onNewChat = () => newChat()
-    const onSearchChats = () => openChatSearch()
-    const onOpenSettings = () => {
-      if (useSettingsDialog.getState().open) {
-        closeSettings()
-      } else {
-        openSettings('general')
+    const onMenuAction = (action: MenuAction) => {
+      switch (action) {
+        case 'new-chat':
+          newChat()
+          break
+        case 'search-chats':
+          toggleChatSearch()
+          break
+        case 'open-settings':
+          toggleSettings()
+          break
+        case 'toggle-sidebar':
+          toggleSidebar()
+          break
+        case 'check-update':
+          checkUpdate()
+          break
       }
-    }
-    const onToggleSidebar = () => {
-      const current = useSettings.getState().siderCollapsed
-      setSiderCollapsed(!current)
-    }
-    const onCheckUpdate = () => {
-      useUpdateStore
-        .getState()
-        .checkUpdate()
-        .then((res) => {
-          if (res.phase === 'available' || res.phase === 'ready') {
-            useUpdateStore.getState().openDialog()
-          } else if (res.phase === 'idle') {
-            showToast('当前已是最新版本')
-          }
-        })
-        .catch(() => {
-          showToast('检查更新失败')
-        })
     }
 
     window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('mygo:new-chat', onNewChat)
-    window.addEventListener('mygo:search-chats', onSearchChats)
-    window.addEventListener('mygo:open-settings', onOpenSettings)
-    window.addEventListener('mygo:toggle-sidebar', onToggleSidebar)
-    window.addEventListener('mygo:check-update', onCheckUpdate)
+    const offMenuAction = isMyGo() ? events.menuAction.on(onMenuAction) : undefined
 
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('mygo:new-chat', onNewChat)
-      window.removeEventListener('mygo:search-chats', onSearchChats)
-      window.removeEventListener('mygo:open-settings', onOpenSettings)
-      window.removeEventListener('mygo:toggle-sidebar', onToggleSidebar)
-      window.removeEventListener('mygo:check-update', onCheckUpdate)
+      offMenuAction?.()
     }
   }, [])
 }

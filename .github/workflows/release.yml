@@ -59,6 +59,7 @@ jobs:
           done
 
   publish-release:
+    if: "!contains(github.ref_name, '-')"
     needs: build
     runs-on: ubuntu-latest
     steps:
