@@ -1,8 +1,9 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
+import type { Workspace } from '../workspace/types.js'
 import { toSessionSummary, type Session, type SessionSummary } from './types.js'
 
 /** IndexedDB 存储结构版本；新增或调整存储、索引时递增。 */
-const DB_VERSION = 11
+const DB_VERSION = 12
 
 /** 文件原件按附件的本地 id 存储，所有引用同一 id 的消息共用一份；用于缩略图、打开查看，以及没有 serverId 时补传。 */
 export type StoredFile = {
@@ -23,6 +24,8 @@ interface ChatDB extends DBSchema {
   }
   /** 当前使用的文件原件 */
   files: { key: string; value: StoredFile }
+  /** 本地工作区列表 */
+  workspaces: { key: string; value: Workspace }
   /**
    * 历史导入的暂存：导入过程中会话与原件只写入这两个存储，`sessions` / `files` 保持不变；
    * 全部校验通过后在一个事务中替换正式数据并清空暂存，失败时只清空暂存。
@@ -57,7 +60,13 @@ const getDB = () =>
   (dbPromise ??= openDB<ChatDB>('chat-demo', DB_VERSION, {
     upgrade(db, _oldVersion, _newVersion, tx) {
       // 初始化当前格式需要的存储与索引，不迁移旧消息。
-      for (const name of ['sessions', 'files', 'sessionsStaging', 'filesStaging'] as const) {
+      for (const name of [
+        'sessions',
+        'files',
+        'workspaces',
+        'sessionsStaging',
+        'filesStaging',
+      ] as const) {
         if (!db.objectStoreNames.contains(name)) {
           db.createObjectStore(name, { keyPath: 'id' })
         }
@@ -245,6 +254,43 @@ export const commitStaging = async (): Promise<SessionSummary[]> => {
   await Promise.all([move('sessionsStaging', 'sessions'), move('filesStaging', 'files'), tx.done])
   // 直接返回本次提交的列表，调用方无需在替换成功后再发起可能失败的读取。
   return summaries
+}
+
+export const loadWorkspaces = async (): Promise<Workspace[]> =>
+  (await getDB()).getAll('workspaces')
+
+export const saveWorkspace = async (workspace: Workspace): Promise<void> => {
+  await (await getDB()).put('workspaces', workspace)
+}
+
+export const deleteWorkspace = async (id: string): Promise<void> => {
+  await (await getDB()).delete('workspaces', id)
+}
+
+/** 移除工作区时将关联会话解绑为普通对话，不删除会话本身。 */
+export const unbindWorkspaceSessions = async (workspaceId: string): Promise<void> => {
+  const tx = (await getDB()).transaction(['sessions', 'sessionSummaries'], 'readwrite')
+  await Promise.all([
+    (async () => {
+      try {
+        for (
+          let cursor = await tx.objectStore('sessions').openCursor();
+          cursor;
+          cursor = await cursor.continue()
+        ) {
+          if (cursor.value.workspaceId === workspaceId) {
+            const updated: Session = { ...cursor.value, workspaceId: null }
+            await cursor.update(updated)
+            await tx.objectStore('sessionSummaries').put(storedSummary(updated))
+          }
+        }
+      } catch (error) {
+        abortTransaction(tx)
+        throw error
+      }
+    })(),
+    tx.done,
+  ])
 }
 
 /** 本地存储失败不打断对话，只在控制台留痕 */

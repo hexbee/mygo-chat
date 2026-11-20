@@ -636,3 +636,116 @@ export const VelaBrandMark = ({
   </svg>
 )
 
+export const IconFolderOutline14 = () => (
+  <svg width={14} height={14} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M2.5 3.25C1.94772 3.25 1.5 3.69772 1.5 4.25V12.25C1.5 12.8023 1.94772 13.25 2.5 13.25H13.5C14.0523 13.25 14.5 12.8023 14.5 12.25V6.25C14.5 5.69772 14.0523 5.25 13.5 5.25H8.06066L6.68934 3.87868C6.40804 3.59738 6.0265 3.43934 5.62868 3.43934H2.5V3.25Z"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconFolderOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M2.5 3.25C1.94772 3.25 1.5 3.69772 1.5 4.25V12.25C1.5 12.8023 1.94772 13.25 2.5 13.25H13.5C14.0523 13.25 14.5 12.8023 14.5 12.25V6.25C14.5 5.69772 14.0523 5.25 13.5 5.25H8.06066L6.68934 3.87868C6.40804 3.59738 6.0265 3.43934 5.62868 3.43934H2.5V3.25Z"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconFolderOpenOutline14 = () => (
+  <svg width={14} height={14} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M1.75 4.25C1.75 3.69772 2.19772 3.25 2.75 3.25H5.87868C6.2765 3.25 6.65804 3.40804 6.93934 3.68934L8 4.75H12.75C13.3023 4.75 13.75 5.19772 13.75 5.75V7H3.5L1.75 12.25V4.25Z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M1.75 12.25L3.35 7.25H14.25L12.75 12.25C12.63 12.68 12.24 13 11.79 13H2.75C2.1 13 1.59 12.69 1.75 12.25Z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconPlusOutline14 = () => (
+  <svg width={14} height={14} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M8 3.25V12.75M3.25 8H12.75"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    />
+  </svg>
+)
+
+export const IconPlusOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M8 3V13M3 8H13"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    />
+  </svg>
+)
+
+/** 仅可查看权限图标：盾牌 + 居中圆点 */
+export const IconShieldReadOnly14 = () => (
+  <svg width={14} height={14} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M8 1.6L13.4 3.7V7.7C13.4 10.95 11.12 13.62 8 14.5C4.88 13.62 2.6 10.95 2.6 7.7V3.7L8 1.6Z"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinejoin="round"
+    />
+    <circle cx="8" cy="7.9" r="1.4" fill="currentColor" />
+  </svg>
+)
+
+/** 工作区内修改权限图标：盾牌 + 勾选 */
+export const IconShieldWrite14 = () => (
+  <svg width={14} height={14} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M8 1.6L13.4 3.7V7.7C13.4 10.95 11.12 13.62 8 14.5C4.88 13.62 2.6 10.95 2.6 7.7V3.7L8 1.6Z"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M5.6 8.05L7.25 9.7L10.55 6.35"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+/** 完全权限图标：盾牌 + 感叹号 */
+export const IconShieldFull14 = () => (
+  <svg width={14} height={14} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M8 1.6L13.4 3.7V7.7C13.4 10.95 11.12 13.62 8 14.5C4.88 13.62 2.6 10.95 2.6 7.7V3.7L8 1.6Z"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M8 5.2V8.4"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+    <circle cx="8" cy="10.75" r="0.85" fill="currentColor" />
+  </svg>
+)
+
+

@@ -1,19 +1,24 @@
 import { create } from 'zustand'
 import type { TtsVoice } from './api/speech.js'
+import type { ChatModel, ReasoningEffort } from './api/types.js'
 import { normalizeLocation, type UserLocation } from './location.js'
+import type { PermissionMode } from './workspace/types.js'
 
 export type Locale = 'zh-CN' | 'en-US'
 
 /** 主题偏好；默认跟随系统 */
 export type ThemePreference = 'light' | 'dark' | 'system'
 
-/** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
+/** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、模型、推理等级、权限默认值、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
   apiKey: string | null
   locale: Locale
   themePreference: ThemePreference
   location: UserLocation | null
   ttsVoice: TtsVoice
+  model: ChatModel
+  reasoningEffort: ReasoningEffort
+  defaultPermissionMode: PermissionMode
   thinking: boolean
   search: boolean
   siderCollapsed: boolean
@@ -25,6 +30,9 @@ const KEYS = {
   location: 'chat-demo:location',
   themePreference: 'chat-demo:theme-preference',
   ttsVoice: 'chat-demo:tts-voice',
+  model: 'chat-demo:model',
+  reasoningEffort: 'chat-demo:reasoning-effort',
+  permissionMode: 'chat-demo:permission-mode',
   thinking: 'chat-demo:thinking',
   search: 'chat-demo:search',
   siderCollapsed: 'chat-demo:sider-collapsed',
@@ -87,13 +95,40 @@ const initialThemePreference = (): ThemePreference => {
 /** 未保存过时使用服务端默认音色 stella（海星） */
 const initialTtsVoice = (): TtsVoice => (read(KEYS.ttsVoice) === 'tide' ? 'tide' : 'stella')
 
+/** 未保存过时使用默认模型 deepseek-flash */
+const initialModel = (): ChatModel =>
+  read(KEYS.model) === 'deepseek-v4-pro' ? 'deepseek-v4-pro' : 'deepseek-flash'
+
+/** 未保存过时兼容旧版 thinking 开关：开启对应 high，关闭对应 off */
+const initialReasoningEffort = (): ReasoningEffort => {
+  const saved = read(KEYS.reasoningEffort)
+  if (saved === 'off' || saved === 'low' || saved === 'high' || saved === 'max') {
+    return saved
+  }
+  return read(KEYS.thinking) === 'true' ? 'high' : 'off'
+}
+
+/** 未保存过时默认权限档位为工作区内修改 */
+const initialPermissionMode = (): PermissionMode => {
+  const saved = read(KEYS.permissionMode)
+  if (saved === 'read-only' || saved === 'workspace-write' || saved === 'full-access') {
+    return saved
+  }
+  return 'workspace-write'
+}
+
+const bootReasoningEffort = initialReasoningEffort()
+
 export const useSettings = create<Settings>(() => ({
   apiKey: read(KEYS.apiKey),
   locale: initialLocale(),
   location: initialLocation(),
   themePreference: initialThemePreference(),
   ttsVoice: initialTtsVoice(),
-  thinking: read(KEYS.thinking) === 'true',
+  model: initialModel(),
+  reasoningEffort: bootReasoningEffort,
+  defaultPermissionMode: initialPermissionMode(),
+  thinking: bootReasoningEffort !== 'off',
   search: read(KEYS.search) === 'true',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
 }))
@@ -124,9 +159,25 @@ export const setApiKey = (apiKey: string | null) => {
   useSettings.setState({ apiKey })
 }
 
-export const setThinking = (thinking: boolean) => {
+export const setModel = (model: ChatModel) => {
+  write(KEYS.model, model)
+  useSettings.setState({ model })
+}
+
+export const setReasoningEffort = (reasoningEffort: ReasoningEffort) => {
+  const thinking = reasoningEffort !== 'off'
+  write(KEYS.reasoningEffort, reasoningEffort)
   write(KEYS.thinking, String(thinking))
-  useSettings.setState({ thinking })
+  useSettings.setState({ reasoningEffort, thinking })
+}
+
+export const setDefaultPermissionMode = (defaultPermissionMode: PermissionMode) => {
+  write(KEYS.permissionMode, defaultPermissionMode)
+  useSettings.setState({ defaultPermissionMode })
+}
+
+export const setThinking = (thinking: boolean) => {
+  setReasoningEffort(thinking ? 'high' : 'off')
 }
 
 export const setSearch = (search: boolean) => {

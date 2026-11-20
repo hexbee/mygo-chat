@@ -10,6 +10,19 @@ declare const styles: {
   readonly newChatIcon: string
   readonly listWrap: string
   readonly list: string
+  readonly workspacesBlock: string
+  readonly workspaceSectionHeader: string
+  readonly workspaceGroup: string
+  readonly workspaceRow: string
+  readonly workspaceChevron: string
+  readonly workspaceChevronOpen: string
+  readonly workspaceFolderIcon: string
+  readonly workspaceName: string
+  readonly workspaceActions: string
+  readonly workspaceRenameInput: string
+  readonly workspaceSessions: string
+  readonly workspaceEmpty: string
+  readonly deleteScratchOption: string
   readonly section: string
   readonly sectionHeader: string
   readonly bottom: string

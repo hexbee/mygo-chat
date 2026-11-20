@@ -6,6 +6,9 @@
 
 export type ChatModel = 'deepseek-flash' | 'deepseek-v4-pro'
 
+/** DeepSeek 推理强度等级；off 表示关闭深度思考，low/high/max 开启思考并经 output_config.effort 下发 */
+export type ReasoningEffort = 'off' | 'low' | 'high' | 'max'
+
 // ---------- 响应：内容块 ----------
 
 /** 正文引用：服务端把模型的引用标记还原为来源，挂在对应文本块上 */
@@ -177,6 +180,7 @@ export type CreateMessageRequest = {
   system: string
   messages: MessageParam[]
   thinking: { type: 'enabled' | 'disabled' }
+  output_config?: { effort: Exclude<ReasoningEffort, 'off'> }
   tools: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
   safety_check: { level: 'high' }
   title?: { enabled: boolean }

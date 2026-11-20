@@ -230,6 +230,7 @@ func setupMenu(win *mygo.Window) {
 func main() {
 	mygo.Bind(AppService{})
 	mygo.Bind(FileService{})
+	mygo.Bind(WorkspaceService{})
 	mygo.Bind(globalUpdateService)
 
 	mygo.App.WhenReady(func() {

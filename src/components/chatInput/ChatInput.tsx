@@ -5,9 +5,8 @@ import {
   IconPaperclipOutline16,
   IconSendOutline16,
   IconStopFill16,
-  IconThinkOutline14,
 } from '../base/icons.js'
-import { setSearch, setThinking, useSettings } from '../../services/settings.js'
+import { setSearch, useSettings } from '../../services/settings.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
 import {
@@ -35,6 +34,9 @@ import { DraftAttachments } from './DraftAttachments.js'
 import { useVoiceInput } from './useVoiceInput.js'
 import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
+import { ModelPicker } from './ModelPicker.js'
+import { PermissionPicker } from './PermissionPicker.js'
+import { WorkspacePicker } from './WorkspacePicker.js'
 import {
   handleAtomicQuoteDeletion,
   insertPlainTextAtRange,
@@ -73,7 +75,6 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const streaming = useChatStore(
     (state) => sessionId !== null && Object.hasOwn(state.streaming, sessionId)
   )
-  const thinking = useSettings((state) => state.thinking)
   const importingHistory = useChatStore((state) => state.importingHistory)
   const isMobile = useIsMobile()
   const search = useSettings((state) => state.search)
@@ -287,6 +288,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         }
       }}
     >
+      <WorkspacePicker sessionId={sessionId} disabled={importingHistory} />
       <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
       <div className={styles.textareaWrapper}>
         <div
@@ -445,48 +447,9 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         />
         {recording && isMobile ? <Spectrum getAnalyser={voice.getAnalyser} /> : null}
       </div>
-      <div className={styles.functionRow}>
-        {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}
+      <div className={styles.functionRow} onClick={(event) => event.stopPropagation()}>
+        {/* 附件按钮 + 三档权限下拉（对齐 DSH）+ 智能搜索开关 */}
         <div ref={togglesRef} className={styles.toggles}>
-          <Tooltip content={t('deactivatedThinkTooltip')}>
-            <button
-              type="button"
-              className={clsx(styles.toggle, thinking && styles.selected)}
-              aria-label={t('thinkingSwitch')}
-              aria-pressed={thinking}
-              onClick={() => setThinking(!thinking)}
-            >
-              <IconThinkOutline14 />
-              <span className={styles.toggleLabel}>{t('thinkingSwitch')}</span>
-            </button>
-          </Tooltip>
-          <Tooltip content={t('deactivatedSearchTooltip')}>
-            <button
-              type="button"
-              className={clsx(styles.toggle, search && styles.selected)}
-              aria-label={t('search')}
-              aria-pressed={search}
-              onClick={() => setSearch(!search)}
-            >
-              <IconGlobeLanguageOutline14 />
-              <span className={styles.toggleLabel}>{t('search')}</span>
-            </button>
-          </Tooltip>
-        </div>
-        <div className={styles.right}>
-          <VoiceButton
-            status={voice.status}
-            disabled={!voice.available}
-            seconds={voice.seconds}
-            onClick={() => {
-              if (
-                voice.status !== 'idle' ||
-                (!useChatStore.getState().importingHistory && ensureApiKey())
-              ) {
-                void voice.toggle()
-              }
-            }}
-          />
           <IconButton
             size="m"
             tone="primary"
@@ -504,6 +467,35 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             onChange={(event) => {
               acceptFiles(Array.from(event.target.files ?? []))
               event.target.value = ''
+            }}
+          />
+          <PermissionPicker sessionId={sessionId} disabled={importingHistory} />
+          <Tooltip content={t('deactivatedSearchTooltip')}>
+            <button
+              type="button"
+              className={clsx(styles.toggle, search && styles.selected)}
+              aria-label={t('search')}
+              aria-pressed={search}
+              onClick={() => setSearch(!search)}
+            >
+              <IconGlobeLanguageOutline14 />
+              <span className={styles.toggleLabel}>{t('search')}</span>
+            </button>
+          </Tooltip>
+        </div>
+        <div className={styles.right}>
+          <ModelPicker disabled={importingHistory} />
+          <VoiceButton
+            status={voice.status}
+            disabled={!voice.available}
+            seconds={voice.seconds}
+            onClick={() => {
+              if (
+                voice.status !== 'idle' ||
+                (!useChatStore.getState().importingHistory && ensureApiKey())
+              ) {
+                void voice.toggle()
+              }
             }}
           />
           {streaming && sessionId ? (

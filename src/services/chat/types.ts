@@ -3,11 +3,13 @@ import type { ApiErrorKind } from '../api/client.js'
 import type {
   ChatModel,
   MessageUsage,
+  ReasoningEffort,
   ServerToolBlock,
   StopDetails,
   StopReason,
   TextCitation,
 } from '../api/types.js'
+import type { PermissionMode } from '../workspace/types.js'
 
 /**
  * 消息附件。id 是本地标识（IndexedDB files 表的主键，原件按它存储，所有引用同一 id 的消息共用一份），
@@ -68,8 +70,58 @@ export type TextPart = {
   isTemplate?: boolean
 }
 
-/** 服务端工具调用与结果块按协议原样保存；历史请求只回传 read_link 调用与结果 */
-export type ReplyBlock = ThinkingPart | TextPart | ServerToolBlock
+/** 审批卡片状态 */
+export type ToolApprovalStatus = 'pending' | 'approved' | 'rejected'
+
+/** 文件修改 Diff 预览数据 */
+export type ToolFileDiff = {
+  path: string
+  oldText: string
+  newText: string
+}
+
+/** 仅用于前端展示的工具元数据（不发送给模型） */
+export type ToolUIMeta = {
+  workdir?: string
+  diffs?: ToolFileDiff[]
+  producedFiles?: string[]
+  exitCode?: number | null
+  truncated?: boolean
+  approvalStatus?: ToolApprovalStatus
+  approvalReason?: string
+}
+
+/** 客户端工具调用块 */
+export type ClientToolUsePart = {
+  type: 'client_tool_use'
+  id: string
+  name: string
+  /** 流式 input_json_delta 累积的原始 JSON 文本 */
+  partialJson?: string
+  /** content_block_stop 后解析得到的对象（空串按 {}，非法 JSON 标记 parseError） */
+  input: Record<string, unknown>
+  parseError?: string
+}
+
+/** 客户端工具执行结果块 */
+export type ClientToolResultPart = {
+  type: 'client_tool_result'
+  tool_use_id: string
+  toolName: string
+  /** 喂给模型的精简文本信封 */
+  content: string
+  isError?: boolean
+  /** 仅用于前端展示（Diff / 退出码 / 产出文件 / 审批态），不发给模型 */
+  uiMeta?: ToolUIMeta
+}
+
+/** 服务端工具调用与结果块按协议原样保存；客户端工具块在 M3+ 由 Agent Loop 消费与展示 */
+export type ReplyBlock =
+  | ThinkingPart
+  | TextPart
+  | ServerToolBlock
+  | ClientToolUsePart
+  | ClientToolResultPart
 
 /**
  * pending：已发出请求，还没收到事件；streaming：正在接收；
@@ -85,6 +137,8 @@ export type AssistantMessage = MessageBranch & {
   model: ChatModel | null
   /** 请求时是否开启深度思考 */
   thinking?: boolean
+  /** 请求时的推理等级（off/low/high/max） */
+  reasoningEffort?: ReasoningEffort
   /** 请求时是否声明 deepseek_web_search；关闭时仍声明 deepseek_read_url */
   search?: boolean
   /** 本轮请求的系统信息快照；各回答版本独立保存，续写沿用。历史消息中缺省的快照保持为空。 */
@@ -120,10 +174,19 @@ export type Session = {
   messages: Message[]
   /** undefined 表示线性消息列表；null 表示空会话。 */
   rootMessageId?: string | null
+  /** 绑定的用户工作区 ID；null/undefined 表示普通/临时会话 */
+  workspaceId?: string | null
+  /** 临时会话透明懒创建的隔离目录绝对路径（不进入侧边栏工作区列表） */
+  scratchDir?: string | null
+  /** 会话级权限档位，缺省视为 'workspace-write' */
+  permissionMode?: PermissionMode
 }
 
 /** 会话列表元数据；消息只在打开会话时加载。 */
-export type SessionSummary = Pick<Session, 'id' | 'title' | 'createdAt' | 'updatedAt'>
+export type SessionSummary = Pick<
+  Session,
+  'id' | 'title' | 'createdAt' | 'updatedAt' | 'workspaceId' | 'scratchDir' | 'permissionMode'
+>
 
 /** 显式提取字段，避免将完整会话的消息带进列表。 */
 export const toSessionSummary = (session: SessionSummary): SessionSummary => ({
@@ -131,4 +194,7 @@ export const toSessionSummary = (session: SessionSummary): SessionSummary => ({
   title: session.title,
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
+  ...(session.workspaceId !== undefined ? { workspaceId: session.workspaceId } : {}),
+  ...(session.scratchDir !== undefined ? { scratchDir: session.scratchDir } : {}),
+  ...(session.permissionMode !== undefined ? { permissionMode: session.permissionMode } : {}),
 })

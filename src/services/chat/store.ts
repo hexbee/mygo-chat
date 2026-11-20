@@ -1,10 +1,18 @@
 import { create } from 'zustand'
+import { WorkspaceService } from '../../mygo.js'
 import { createId } from '../../utils/id.js'
 import { ApiError, streamMessage } from '../api/client.js'
-import type { ChatModel, CreateMessageRequest } from '../api/types.js'
+import type { CreateMessageRequest, ReasoningEffort } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
 import { useSettings } from '../settings.js'
+import {
+  deleteWorkspaceRecord,
+  setDraftPermissionMode,
+  setDraftWorkspaceId,
+  useWorkspaceStore,
+} from '../workspace/store.js'
+import type { PermissionMode } from '../workspace/types.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
@@ -32,8 +40,6 @@ import {
   type UserMessage,
 } from './types.js'
 
-/** deepseek-flash 同时支持深度思考与图片输入 */
-const MODEL: ChatModel = 'deepseek-flash'
 /** 所有生成请求统一携带的助手身份说明 */
 const SYSTEM_PROMPT = '该助手为DeepSeek，由深度求索公司创造。'
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
@@ -103,7 +109,12 @@ const getStreamController = (id: string) => {
 }
 
 const sameSummary = (a: SessionSummary, b: SessionSummary) =>
-  a.title === b.title && a.createdAt === b.createdAt && a.updatedAt === b.updatedAt
+  a.title === b.title &&
+  a.createdAt === b.createdAt &&
+  a.updatedAt === b.updatedAt &&
+  a.workspaceId === b.workspaceId &&
+  a.scratchDir === b.scratchDir &&
+  a.permissionMode === b.permissionMode
 
 const sessionAccess = new Map<string, number>()
 const unsavedSessions = new Set<string>()
@@ -253,15 +264,16 @@ export const bindChatPersistence = () => {
   }
 }
 
-/** 按当前开关创建回复：深度思考对应 thinking，智能搜索控制 deepseek_web_search。 */
+/** 按当前开关创建回复：模型与推理等级从 settings 读取，智能搜索控制 deepseek_web_search。 */
 const createReply = (): AssistantMessage => {
-  const { thinking, search } = useSettings.getState()
+  const { model, reasoningEffort, search } = useSettings.getState()
   return {
     id: createId(),
     role: 'assistant',
     createdAt: Date.now(),
-    model: MODEL,
-    thinking,
+    model,
+    thinking: reasoningEffort !== 'off',
+    reasoningEffort,
     search,
     prefix: true,
     status: 'pending',
@@ -447,6 +459,95 @@ export const newChat = () => {
   }
 }
 
+/** 在指定工作区（或未分组 null）下开启新对话 */
+export const newChatInWorkspace = (workspaceId: string | null) => {
+  if (!get().importingHistory) {
+    setDraftWorkspaceId(workspaceId)
+    set({ activeId: null })
+    trimSessionCache()
+  }
+}
+
+/** 绑定或切换会话所属工作区；null 表示新对话草稿 */
+export const setSessionWorkspace = (sessionId: string | null, workspaceId: string | null) => {
+  if (get().importingHistory) {
+    return
+  }
+  if (sessionId === null) {
+    setDraftWorkspaceId(workspaceId)
+    return
+  }
+  if (deletingSessions.has(sessionId)) {
+    return
+  }
+  if (getSession(sessionId)) {
+    updateSession(sessionId, (session) =>
+      session.workspaceId === workspaceId ? session : { ...session, workspaceId }
+    )
+    persist(sessionId)
+  } else {
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId ? { ...session, workspaceId } : session
+      ),
+    }))
+    void ensureSessionLoaded(sessionId).then(() => {
+      if (getSession(sessionId)) {
+        updateSession(sessionId, (session) => ({ ...session, workspaceId }))
+        persist(sessionId)
+      }
+    })
+  }
+}
+
+/** 更新会话级权限档位；null 表示新对话草稿与全局默认值 */
+export const setSessionPermissionMode = (sessionId: string | null, permissionMode: PermissionMode) => {
+  if (get().importingHistory) {
+    return
+  }
+  if (sessionId === null) {
+    setDraftPermissionMode(permissionMode)
+    return
+  }
+  if (deletingSessions.has(sessionId)) {
+    return
+  }
+  if (getSession(sessionId)) {
+    updateSession(sessionId, (session) =>
+      session.permissionMode === permissionMode ? session : { ...session, permissionMode }
+    )
+    persist(sessionId)
+  } else {
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId ? { ...session, permissionMode } : session
+      ),
+    }))
+    void ensureSessionLoaded(sessionId).then(() => {
+      if (getSession(sessionId)) {
+        updateSession(sessionId, (session) => ({ ...session, permissionMode }))
+        persist(sessionId)
+      }
+    })
+  }
+}
+
+/** 移除工作区并将关联会话解除绑定（会话保留在普通对话区，不删除磁盘目录） */
+export const removeWorkspace = async (workspaceId: string): Promise<void> => {
+  await deleteWorkspaceRecord(workspaceId)
+  set((state) => ({
+    sessions: state.sessions.map((session) =>
+      session.workspaceId === workspaceId ? { ...session, workspaceId: null } : session
+    ),
+    sessionCache: Object.fromEntries(
+      Object.entries(state.sessionCache).map(([id, session]) => [
+        id,
+        session.workspaceId === workspaceId ? { ...session, workspaceId: null } : session,
+      ])
+    ),
+  }))
+}
+
 export const selectSession = (id: string) => {
   if (!get().importingHistory && get().sessions.some((session) => session.id === id)) {
     touchSession(id)
@@ -481,17 +582,25 @@ export const renameSession = (id: string, title: string) => {
  * 删除会话；本地原件仅在没有其他会话引用时清理。远端文件不删：导入、编辑、重新生成都会复用同一个附件，
  * 同一服务端文件可能被多个会话引用，不维护引用计数。
  */
-export const removeSession = (id: string): Promise<boolean> => {
-  const task = removeSessionData(id).finally(() => deletionTasks.delete(task))
+export const removeSession = (
+  id: string,
+  options?: { removeScratchDir?: boolean }
+): Promise<boolean> => {
+  const task = removeSessionData(id, options).finally(() => deletionTasks.delete(task))
   deletionTasks.add(task)
   return task
 }
 
-const removeSessionData = async (id: string): Promise<boolean> => {
+const removeSessionData = async (
+  id: string,
+  options?: { removeScratchDir?: boolean }
+): Promise<boolean> => {
   if (get().importingHistory || deletingSessions.has(id)) {
     return false
   }
   const epoch = historyEpoch
+  const summary = get().sessions.find((session) => session.id === id)
+  const hasScratch = Boolean(summary?.scratchDir || getSession(id)?.scratchDir)
   deletingSessions.add(id)
   try {
     getStreamController(id)?.abort()
@@ -501,6 +610,9 @@ const removeSessionData = async (id: string): Promise<boolean> => {
       return false
     }
     await db.deleteSession(id)
+    if (hasScratch && options?.removeScratchDir) {
+      await WorkspaceService.removeScratchDir(id).catch(() => {})
+    }
     if (epoch !== historyEpoch) {
       return true
     }
@@ -563,6 +675,7 @@ export const sendMessage = (targetSessionId: string | null) => {
     return false
   }
   if (sessionId === null) {
+    const { draftWorkspaceId, draftPermissionMode } = useWorkspaceStore.getState()
     const session: Session = {
       id: createId(),
       title: '',
@@ -570,6 +683,8 @@ export const sendMessage = (targetSessionId: string | null) => {
       updatedAt: now,
       messages: [],
       rootMessageId: null,
+      ...(draftWorkspaceId ? { workspaceId: draftWorkspaceId } : {}),
+      permissionMode: draftPermissionMode,
     }
     sessionId = session.id
     touchSession(session.id)
@@ -706,12 +821,16 @@ export const continueReply = (sessionId: string, messageId: string) => {
   ) {
     return
   }
-  const { thinking, search } = useSettings.getState()
+  const { model, reasoningEffort, search } = useSettings.getState()
+  const resolvedEffort: ReasoningEffort =
+    previous.reasoningEffort ??
+    (previous.thinking === undefined ? reasoningEffort : previous.thinking ? 'high' : 'off')
   const reply: AssistantMessage = {
     ...previous,
-    // 未记录请求配置的回复，续写时使用默认模型和当前开关。
-    model: previous.model ?? MODEL,
-    thinking: previous.thinking ?? thinking,
+    // 未记录请求配置的回复，续写时使用当前所选模型和推理等级。
+    model: previous.model ?? model,
+    thinking: resolvedEffort !== 'off',
+    reasoningEffort: resolvedEffort,
     search: previous.search ?? search,
     status: 'pending',
     stopReason: undefined,
@@ -997,13 +1116,16 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           initial.thinking ?? false,
           latestReminder
         )
+        const effort: ReasoningEffort =
+          initial.reasoningEffort ?? (initial.thinking ? 'high' : 'off')
         const events = streamMessage(
           useSettings.getState().apiKey ?? '',
           {
-            model: initial.model ?? MODEL,
+            model: initial.model ?? useSettings.getState().model,
             system: SYSTEM_PROMPT,
             messages,
-            thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
+            thinking: { type: effort === 'off' ? 'disabled' : 'enabled' },
+            ...(effort === 'off' ? {} : { output_config: { effort } }),
             safety_check: SAFETY_CHECK,
             tools: serverTools(initial.search ?? false),
             ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),

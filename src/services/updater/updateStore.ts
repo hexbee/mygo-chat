@@ -15,7 +15,9 @@ interface UpdateStoreState {
 let pollTimer: number | null = null
 
 const startPolling = (set: (fn: (s: UpdateStoreState) => Partial<UpdateStoreState>) => void) => {
-  if (pollTimer !== null) return
+  if (pollTimer !== null) {
+    return
+  }
   pollTimer = window.setInterval(async () => {
     try {
       const current = await UpdateService.getUpdateStatus()
@@ -80,8 +82,8 @@ export const useUpdateStore = create<UpdateStoreState>((set) => ({
   relaunch: async () => {
     try {
       await UpdateService.relaunch()
-    } catch (err) {
-      console.error('Failed to relaunch app:', err)
+    } catch {
+      // 重启失败时保持当前状态
     }
   },
 }))

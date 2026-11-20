@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
+import { initWorkspaces } from '../services/workspace/store.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
 import {
   bindChatPersistence,
@@ -74,6 +75,7 @@ export const App = () => {
 
   useEffect(() => {
     void initChat()
+    void initWorkspaces()
     // 首次打开先在设置里输入 API Key
     ensureApiKey()
   }, [])

@@ -406,7 +406,9 @@ const UpdateSetting = () => {
   useEffect(() => {
     AppService.getAppInfo()
       .then((info) => {
-        if (info?.version) setVersion(`v${info.version}`)
+        if (info?.version) {
+          setVersion(`v${info.version}`)
+        }
       })
       .catch(() => {})
   }, [])

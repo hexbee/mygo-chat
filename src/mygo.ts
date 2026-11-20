@@ -41,7 +41,10 @@ export const AppService = {
   getAppInfo(): Promise<AppInfo> {
     return call("AppService.GetAppInfo");
   },
-  /** SetTheme syncs the native window appearance (including Windows caption buttons) with the user's theme preference ("system", "light", or "dark"). */
+  /**
+   * SetTheme syncs the native window appearance (including Windows caption buttons)
+   * with the user's theme preference ("system", "light", or "dark").
+   */
   setTheme(theme: string): Promise<void> {
     return call("AppService.SetTheme", theme);
   },
@@ -56,6 +59,29 @@ export const FileService = {
   /** SaveFile prompts the user with a native Save dialog and writes the base64 content */
   saveFile(defaultName: string, contentBase64: string): Promise<boolean> {
     return call("FileService.SaveFile", defaultName, contentBase64);
+  },
+} as const;
+
+/** WorkspaceService handles native directory picking, scratch directory cleanup, and file manager actions. */
+export const WorkspaceService = {
+  /** OpenPath opens a file or directory using the system default application. */
+  openPath(absPath: string): Promise<void> {
+    return call("WorkspaceService.OpenPath", absPath);
+  },
+  /**
+   * PickDirectory prompts the user with a native directory chooser and returns the selected absolute path.
+   * Returns an empty string when the user cancels the dialog.
+   */
+  pickDirectory(): Promise<string> {
+    return call("WorkspaceService.PickDirectory");
+  },
+  /** RemoveScratchDir removes the isolated scratch directory (~/.vela/scratch/<sessionID>) for a session. */
+  removeScratchDir(sessionID: string): Promise<void> {
+    return call("WorkspaceService.RemoveScratchDir", sessionID);
+  },
+  /** RevealInFinder reveals the specified path in Finder (macOS), Explorer (Windows), or the file manager (Linux). */
+  revealInFinder(absPath: string): Promise<void> {
+    return call("WorkspaceService.RevealInFinder", absPath);
   },
 } as const;
 
