@@ -61,7 +61,10 @@ const computeLineDiff = (oldText: string, newText: string): DiffLine[] => {
     .slice(Math.max(0, prefix - CONTEXT_RADIUS), prefix)
     .map((text): DiffLine => ({ kind: 'context', text }))
   const suffixContext = oldLines
-    .slice(oldLines.length - suffix, Math.min(oldLines.length, oldLines.length - suffix + CONTEXT_RADIUS))
+    .slice(
+      oldLines.length - suffix,
+      Math.min(oldLines.length, oldLines.length - suffix + CONTEXT_RADIUS)
+    )
     .map((text): DiffLine => ({ kind: 'context', text }))
 
   if (oldMid.length === 0 && newMid.length === 0) {
@@ -160,9 +163,7 @@ export const DiffView = memo(function DiffView({ diff }: { diff: ToolFileDiff })
         ))}
       </div>
       {truncatedCount > 0 ? (
-        <div className={styles.truncated}>
-          {t('toolDiffTruncated', { count: truncatedCount })}
-        </div>
+        <div className={styles.truncated}>{t('toolDiffTruncated', { count: truncatedCount })}</div>
       ) : null}
     </div>
   )

@@ -3,12 +3,7 @@ import type { ClientToolDefinition } from '../api/types.js'
 import { isMCPReadOnlyTool, markSessionMCPToolsLoaded } from '../mcp/store.js'
 import { useSettings } from '../settings.js'
 import type { PermissionMode } from '../workspace/types.js'
-import type {
-  ClientToolResultPart,
-  ClientToolUsePart,
-  ToolFileDiff,
-  ToolUIMeta,
-} from './types.js'
+import type { ClientToolResultPart, ClientToolUsePart, ToolFileDiff, ToolUIMeta } from './types.js'
 
 const READ_ONLY_TOOLS = new Set(['read', 'glob', 'grep', 'job_output', 'skill'])
 const READ_CONCURRENCY_LIMIT = 4
@@ -81,7 +76,8 @@ export const CLIENT_FILE_TOOLS: ClientToolDefinition[] = [
         },
         replace_all: {
           type: 'boolean',
-          description: 'Replace every occurrence of old_string instead of requiring a unique match.',
+          description:
+            'Replace every occurrence of old_string instead of requiring a unique match.',
         },
       },
       required: ['file_path', 'old_string', 'new_string'],
@@ -161,7 +157,8 @@ export const CLIENT_FILE_TOOLS: ClientToolDefinition[] = [
         },
         workdir: {
           type: 'string',
-          description: 'Optional working directory override (defaults to workspace or scratch dir).',
+          description:
+            'Optional working directory override (defaults to workspace or scratch dir).',
         },
         timeoutMs: {
           type: 'integer',
@@ -184,7 +181,8 @@ export const CLIENT_FILE_TOOLS: ClientToolDefinition[] = [
         },
         wait_ms: {
           type: 'integer',
-          description: 'Optional milliseconds to wait for new output or completion (default 0, max 30000).',
+          description:
+            'Optional milliseconds to wait for new output or completion (default 0, max 30000).',
         },
       },
       required: ['job_id'],
@@ -231,10 +229,7 @@ export type AgentWorkspaceContext = {
 }
 
 /** 组装包含工作区状态、权限边界、Skills 渐进式摘要与 MCP 指令/按需目录的系统提示，避免普通闲聊误触磁盘探测 */
-export const buildAgentSystemPrompt = (
-  basePrompt: string,
-  ctx: AgentWorkspaceContext
-): string => {
+export const buildAgentSystemPrompt = (basePrompt: string, ctx: AgentWorkspaceContext): string => {
   const permissionNote =
     ctx.permissionMode === 'read-only'
       ? '当前权限档位：仅可查看（read-only），仅允许 read/glob/grep 与严格只读命令（OS 沙箱禁止写盘），禁止写入、修改、删除或执行写命令。'

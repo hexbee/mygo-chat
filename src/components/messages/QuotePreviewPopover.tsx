@@ -104,7 +104,10 @@ export const QuotePreviewPopover = () => {
     } else if (belowTop + height <= window.innerHeight - VIEWPORT_MARGIN) {
       top = belowTop
     } else {
-      top = Math.max(VIEWPORT_MARGIN, Math.min(aboveTop, window.innerHeight - height - VIEWPORT_MARGIN))
+      top = Math.max(
+        VIEWPORT_MARGIN,
+        Math.min(aboveTop, window.innerHeight - height - VIEWPORT_MARGIN)
+      )
     }
     if (!preview.ready || preview.top !== top || preview.left !== left) {
       setPreview((current) =>

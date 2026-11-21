@@ -525,7 +525,13 @@ export const IconToastError16 = () => (
 )
 
 /** DeepSeek Harness 下载图标（14x14 线性托盘下载箭头） */
-export const IconDownloadOutline14 = ({ size = 14, className }: { size?: number; className?: string }) => (
+export const IconDownloadOutline14 = ({
+  size = 14,
+  className,
+}: {
+  size?: number
+  className?: string
+}) => (
   <svg
     width={size}
     height={size}
@@ -535,8 +541,19 @@ export const IconDownloadOutline14 = ({ size = 14, className }: { size?: number;
     className={className}
     xmlns="http://www.w3.org/2000/svg"
   >
-    <path vectorEffect="non-scaling-stroke" d="M8 1.95317V10.0469" stroke="currentColor" strokeLinecap="round" />
-    <path vectorEffect="non-scaling-stroke" d="M4.25 6.29688L8 10.0469L11.75 6.29688" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+    <path
+      vectorEffect="non-scaling-stroke"
+      d="M8 1.95317V10.0469"
+      stroke="currentColor"
+      strokeLinecap="round"
+    />
+    <path
+      vectorEffect="non-scaling-stroke"
+      d="M4.25 6.29688L8 10.0469L11.75 6.29688"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
     <path
       vectorEffect="non-scaling-stroke"
       d="M1.5 10.0469V13.158C1.5 13.3937 1.60536 13.6198 1.79289 13.7865C1.98043 13.9532 2.23478 14.0469 2.5 14.0469H13.5C13.7652 14.0469 14.0196 13.9532 14.2071 13.7865C14.3946 13.6198 14.5 13.3937 14.5 13.158V10.0469"
@@ -548,7 +565,13 @@ export const IconDownloadOutline14 = ({ size = 14, className }: { size?: number;
 )
 
 /** DeepSeek Harness 加载圆环动画图标 */
-export const IconLoadingOutline14 = ({ size = 14, className }: { size?: number; className?: string }) => (
+export const IconLoadingOutline14 = ({
+  size = 14,
+  className,
+}: {
+  size?: number
+  className?: string
+}) => (
   <svg
     width={size}
     height={size}
@@ -581,12 +604,7 @@ export const IconChatBubbleOutline16 = () => (
       strokeLinecap="round"
       strokeLinejoin="round"
     />
-    <path
-      d="M7 8.4H13M7 11.1H11"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-    />
+    <path d="M7 8.4H13M7 11.1H11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
   </svg>
 )
 
@@ -604,13 +622,7 @@ export const IconUserOutline10 = () => (
 )
 
 /** 船帆座 · Vela 品牌标志（极简双帆 + 船身弧线） */
-export const VelaBrandMark = ({
-  size = 20,
-  className,
-}: {
-  size?: number
-  className?: string
-}) => (
+export const VelaBrandMark = ({ size = 20, className }: { size?: number; className?: string }) => (
   <svg
     width={size}
     height={size}
@@ -688,12 +700,7 @@ export const IconPlusOutline14 = () => (
 
 export const IconPlusOutline16 = () => (
   <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path
-      d="M8 3V13M3 8H13"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-    />
+    <path d="M8 3V13M3 8H13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
   </svg>
 )
 
@@ -738,14 +745,7 @@ export const IconShieldFull14 = () => (
       strokeWidth="1.35"
       strokeLinejoin="round"
     />
-    <path
-      d="M8 5.2V8.4"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-    />
+    <path d="M8 5.2V8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     <circle cx="8" cy="10.75" r="0.85" fill="currentColor" />
   </svg>
 )
-
-

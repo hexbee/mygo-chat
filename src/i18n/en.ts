@@ -222,7 +222,8 @@ export const en = {
   permissionWorkspaceWrite: 'Edit in workspace',
   permissionWorkspaceWriteDesc: 'Edit files inside workspace; write commands require approval',
   permissionFullAccess: 'Full access',
-  permissionFullAccessDesc: 'Cross-directory operations and commands (high-risk actions still confirm)',
+  permissionFullAccessDesc:
+    'Cross-directory operations and commands (high-risk actions still confirm)',
   modelMenuLabel: 'Model & Reasoning Effort',
   modelSectionTitle: 'Model',
   reasoningEffortLabel: 'Reasoning effort',
@@ -286,7 +287,8 @@ export const en = {
   settingsBlacklistAdd: 'Add',
   settingsBlacklistReset: 'Reset defaults',
   settingsBlacklistResetToast: 'Restored default command blacklist',
-  settingsBlacklistEmpty: 'Blacklist is empty: all sandboxed workspace commands will run automatically.',
+  settingsBlacklistEmpty:
+    'Blacklist is empty: all sandboxed workspace commands will run automatically.',
   settingDialogAsideSkillsOptionLabel: 'Skills',
   settingsSkillsTitle: 'Skills Directories & Toggles',
   settingsSkillsDescription:
@@ -315,7 +317,8 @@ export const en = {
   atFileMenuNoWorkspace: 'Select a workspace to mention files',
   settingDialogAsideMcpOptionLabel: 'MCP',
   settingsMcpTitle: 'MCP Servers',
-  settingsMcpDescription: 'Connect MCP servers to extend available tools. Saved in ~/.vela/mcp.json.',
+  settingsMcpDescription:
+    'Connect MCP servers to extend available tools. Saved in ~/.vela/mcp.json.',
   settingsMcpAddServer: '+ Add Server',
   settingsMcpImportJson: 'Import JSON',
   settingsMcpEmpty:
@@ -339,10 +342,12 @@ export const en = {
   settingsMcpAddTitle: 'Add MCP Server',
   settingsMcpEditTitle: 'Edit MCP Server',
   settingsMcpFieldName: 'Server Name',
-  settingsMcpFieldNameHint: '1–32 letters, digits, underscores, or hyphens (used as mcp__<name>__<tool>)',
+  settingsMcpFieldNameHint:
+    '1–32 letters, digits, underscores, or hyphens (used as mcp__<name>__<tool>)',
   settingsMcpFieldTransport: 'Transport',
   settingsMcpFieldHeaders: 'Headers',
-  settingsMcpFieldHeadersHint: 'Optional static authentication headers (e.g. Authorization: Bearer ...)',
+  settingsMcpFieldHeadersHint:
+    'Optional static authentication headers (e.g. Authorization: Bearer ...)',
   settingsMcpFieldCommand: 'Command',
   settingsMcpFieldArgs: 'Arguments',
   settingsMcpFieldCwd: 'Working Directory (Cwd)',
@@ -355,14 +360,17 @@ export const en = {
   settingsMcpToolLoading: 'Tool Loading',
   settingsMcpLoadingOnDemand: 'On-demand (recommended)',
   settingsMcpLoadingEager: 'Eager (load all)',
-  settingsMcpToolLoadingHint: 'On-demand injects only a compact catalog into the prompt and loads schemas via load_tools as needed.',
+  settingsMcpToolLoadingHint:
+    'On-demand injects only a compact catalog into the prompt and loads schemas via load_tools as needed.',
   settingsMcpTimeoutMs: 'Call Timeout (ms)',
   settingsMcpKeepAliveMs: 'Keepalive Interval (ms)',
   settingsMcpKeepAlivePlaceholder: 'Empty for default (HTTP 30000ms, Stdio off); -1 to disable',
-  settingsMcpKeepAliveHint: 'Leave empty or 0 for transport default; -1 disables keepalive; custom range 1000–300000.',
+  settingsMcpKeepAliveHint:
+    'Leave empty or 0 for transport default; -1 disables keepalive; custom range 1000–300000.',
   settingsMcpAutoReconnect: 'Auto Reconnect (exponential backoff)',
   settingsMcpTrustServer: 'Trust this server (skip approval in Edit in workspace mode)',
-  settingsMcpTrustServerHint: 'When off, non-read-only MCP tools prompt for one-time approval in Edit in workspace mode.',
+  settingsMcpTrustServerHint:
+    'When off, non-read-only MCP tools prompt for one-time approval in Edit in workspace mode.',
   settingsMcpEnabledOnSave: 'Enable and connect immediately',
   settingsMcpHideSecret: 'Hide',
   settingsMcpShowSecret: 'Show',

@@ -87,8 +87,7 @@ const getDB = () =>
 export const loadSessionSummaries = async (): Promise<SessionSummary[]> =>
   (await (await getDB()).getAll('sessionSummaries')).map(toSessionSummary)
 
-export const loadAllSessions = async (): Promise<Session[]> =>
-  (await getDB()).getAll('sessions')
+export const loadAllSessions = async (): Promise<Session[]> => (await getDB()).getAll('sessions')
 
 export const loadSession = async (id: string): Promise<Session | undefined> =>
   (await getDB()).get('sessions', id)
@@ -256,8 +255,7 @@ export const commitStaging = async (): Promise<SessionSummary[]> => {
   return summaries
 }
 
-export const loadWorkspaces = async (): Promise<Workspace[]> =>
-  (await getDB()).getAll('workspaces')
+export const loadWorkspaces = async (): Promise<Workspace[]> => (await getDB()).getAll('workspaces')
 
 export const saveWorkspace = async (workspace: Workspace): Promise<void> => {
   await (await getDB()).put('workspaces', workspace)

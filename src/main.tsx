@@ -7,11 +7,7 @@ import { ensureKatex } from './services/markdown/katex.js'
 import './app/theme.css'
 import './app/global.css'
 
-document.documentElement.dataset.platform = isMyGo()
-  ? runtime().platform
-  : isMac
-    ? 'darwin'
-    : 'web'
+document.documentElement.dataset.platform = isMyGo() ? runtime().platform : isMac ? 'darwin' : 'web'
 
 ensureKatex()
 setupTheme()

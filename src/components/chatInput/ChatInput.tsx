@@ -40,11 +40,7 @@ import { WorkspaceService, type WorkspaceFileCandidate } from '../../mygo.js'
 import { AtFileMenu, type AtBreadcrumbItem } from './AtFileMenu.js'
 import { ModelPicker } from './ModelPicker.js'
 import { PermissionPicker } from './PermissionPicker.js'
-import {
-  SlashSkillMenu,
-  type SlashCommandItem,
-  type SlashMenuItem,
-} from './SlashSkillMenu.js'
+import { SlashSkillMenu, type SlashCommandItem, type SlashMenuItem } from './SlashSkillMenu.js'
 import { WorkspacePicker } from './WorkspacePicker.js'
 import {
   getAtMatchAtCaret,

@@ -78,7 +78,9 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
 
   const generalSessions = useMemo(() => {
     const workspaceIds = new Set(workspaces.map((w) => w.id))
-    return sessions.filter((session) => !session.workspaceId || !workspaceIds.has(session.workspaceId))
+    return sessions.filter(
+      (session) => !session.workspaceId || !workspaceIds.has(session.workspaceId)
+    )
   }, [sessions, workspaces])
 
   const groups = useMemo(() => groupSessions(generalSessions, now, t), [generalSessions, now, t])
@@ -109,7 +111,10 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
 
   useEffect(() => {
     // 启动时后台静默检查更新
-    useUpdateStore.getState().checkUpdate().catch(() => {})
+    useUpdateStore
+      .getState()
+      .checkUpdate()
+      .catch(() => {})
   }, [])
 
   const handleAddWorkspace = async () => {

@@ -110,7 +110,8 @@ export const zh = {
   historyImportConfirm: '确认导入',
   historyImportConfirmTitle: '确认导入历史对话？',
   historyImportConfirmDescription: '上传的历史对话会覆盖当前所有对话记录，是否确认导入？',
-  historyImportDescription: '导入历史对话会覆盖全部本地对话和附件，支持 Vela 及 DeepSeek 导出的 ZIP 文件。',
+  historyImportDescription:
+    '导入历史对话会覆盖全部本地对话和附件，支持 Vela 及 DeepSeek 导出的 ZIP 文件。',
   historyImportedOne: '已导入 1 个对话',
   historyImported: '已导入 {count} 个对话',
   historyImportFailed:
@@ -346,7 +347,8 @@ export const zh = {
   settingsMcpToolLoading: '工具加载模式',
   settingsMcpLoadingOnDemand: '按需加载（推荐）',
   settingsMcpLoadingEager: '全量加载',
-  settingsMcpToolLoadingHint: '按需加载仅在系统提示中展示工具目录，模型按需调用 load_tools 以节省上下文 Token',
+  settingsMcpToolLoadingHint:
+    '按需加载仅在系统提示中展示工具目录，模型按需调用 load_tools 以节省上下文 Token',
   settingsMcpTimeoutMs: '单次调用超时（毫秒）',
   settingsMcpKeepAliveMs: '心跳保活间隔（毫秒）',
   settingsMcpKeepAlivePlaceholder: '留空使用默认（HTTP 30000ms，Stdio 关闭）；-1 禁用',

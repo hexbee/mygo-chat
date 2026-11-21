@@ -65,7 +65,8 @@ export const serializeDraftSegments = (segments: DraftSegment[]): string => {
       if (!rawPath) {
         continue
       }
-      const formattedPath = segment.kind === 'directory' && !rawPath.endsWith('/') ? `${rawPath}/` : rawPath
+      const formattedPath =
+        segment.kind === 'directory' && !rawPath.endsWith('/') ? `${rawPath}/` : rawPath
       if (result && !/\s$/.test(result)) {
         result += ' '
       }
@@ -84,8 +85,7 @@ export const serializeDraftSegments = (segments: DraftSegment[]): string => {
   return result
 }
 
-const segmentsFromText = (text: string): DraftSegment[] =>
-  text ? [{ type: 'text', text }] : []
+const segmentsFromText = (text: string): DraftSegment[] => (text ? [{ type: 'text', text }] : [])
 
 /** 草稿只保存在本次页面的内存中，独立于会话详情缓存；null 是新对话的草稿。 */
 export const useDrafts = create<{

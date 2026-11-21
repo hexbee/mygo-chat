@@ -77,7 +77,9 @@ export const UpdateDialog = () => {
     >
       <div className={styles.versionHeader}>
         <div className={styles.versionTitle}>
-          {state.version ? t('desktopUpdateNewVersion', { version: state.version }) : t('desktopUpdateTitle')}
+          {state.version
+            ? t('desktopUpdateNewVersion', { version: state.version })
+            : t('desktopUpdateTitle')}
         </div>
       </div>
 
@@ -107,9 +109,7 @@ export const UpdateDialog = () => {
         </>
       ) : null}
 
-      {isError && state.error ? (
-        <div className={styles.errorMessage}>{state.error}</div>
-      ) : null}
+      {isError && state.error ? <div className={styles.errorMessage}>{state.error}</div> : null}
     </Modal>
   )
 }

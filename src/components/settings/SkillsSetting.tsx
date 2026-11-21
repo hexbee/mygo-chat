@@ -166,7 +166,9 @@ export const SkillsSetting = () => {
           priorityOffset={0}
           hasWorkspace={Boolean(activeWorkdir)}
           isProject
-          onMove={(idx, delta) => setSkillProjectDirs(moveItem(skillConfig.projectDirs, idx, delta))}
+          onMove={(idx, delta) =>
+            setSkillProjectDirs(moveItem(skillConfig.projectDirs, idx, delta))
+          }
           onRemove={(idx) =>
             setSkillProjectDirs(skillConfig.projectDirs.filter((_, i) => i !== idx))
           }

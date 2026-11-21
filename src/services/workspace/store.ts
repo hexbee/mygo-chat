@@ -120,8 +120,7 @@ export const useWorkspaceStore = create<WorkspaceState>(() => ({
 
 const { getState: get, setState: set } = useWorkspaceStore
 
-const sortWorkspaces = (list: Workspace[]) =>
-  [...list].sort((a, b) => b.updatedAt - a.updatedAt)
+const sortWorkspaces = (list: Workspace[]) => [...list].sort((a, b) => b.updatedAt - a.updatedAt)
 
 let initTask: Promise<void> | undefined
 
@@ -146,7 +145,10 @@ export const initWorkspaces = (): Promise<void> => {
   return initTask
 }
 
-export const addWorkspace = async (rawPath: string, customName?: string): Promise<Workspace | null> => {
+export const addWorkspace = async (
+  rawPath: string,
+  customName?: string
+): Promise<Workspace | null> => {
   const path = normalizeWorkspacePath(rawPath)
   if (!path) {
     return null

@@ -55,7 +55,7 @@ export const WorkspacePicker = ({
     sessionId === null ? null : (sessionDetail?.scratchDir ?? sessionSummary?.scratchDir ?? null)
 
   const activeWorkspace = useMemo(
-    () => (activeWorkspaceId ? workspaces.find((w) => w.id === activeWorkspaceId) ?? null : null),
+    () => (activeWorkspaceId ? (workspaces.find((w) => w.id === activeWorkspaceId) ?? null) : null),
     [activeWorkspaceId, workspaces]
   )
   const suffixes = useMemo(() => distinguishingPathSuffixes(workspaces), [workspaces])
@@ -172,7 +172,9 @@ export const WorkspacePicker = ({
                           <span className={styles.optionBody}>
                             <span className={styles.optionTitleRow}>
                               <span className={styles.optionTitle}>{workspace.name}</span>
-                              {suffix ? <span className={styles.optionSuffix}>{suffix}</span> : null}
+                              {suffix ? (
+                                <span className={styles.optionSuffix}>{suffix}</span>
+                              ) : null}
                             </span>
                           </span>
                           <span className={styles.check}>

@@ -149,11 +149,12 @@ const settleApproval = (toolUseId: string, decision: ApprovalDecision) => {
 
 export const approveToolCall = (toolUseId: string, allowSession = false) =>
   settleApproval(toolUseId, { approved: true, allowSession })
-export const rejectToolCall = (toolUseId: string) =>
-  settleApproval(toolUseId, { approved: false })
+export const rejectToolCall = (toolUseId: string) => settleApproval(toolUseId, { approved: false })
 
 const rejectSessionApprovals = (sessionId: string) => {
-  const pending = Object.values(get().pendingApprovals).filter((item) => item.sessionId === sessionId)
+  const pending = Object.values(get().pendingApprovals).filter(
+    (item) => item.sessionId === sessionId
+  )
   for (const item of pending) {
     settleApproval(item.toolUseId, { approved: false })
   }
@@ -605,7 +606,10 @@ export const setSessionWorkspace = (sessionId: string | null, workspaceId: strin
 }
 
 /** 更新会话级权限档位；null 表示新对话草稿与全局默认值 */
-export const setSessionPermissionMode = (sessionId: string | null, permissionMode: PermissionMode) => {
+export const setSessionPermissionMode = (
+  sessionId: string | null,
+  permissionMode: PermissionMode
+) => {
   if (get().importingHistory) {
     return
   }

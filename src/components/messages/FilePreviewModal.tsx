@@ -64,10 +64,7 @@ export const FilePreviewModal = ({
 
   const canToggleRendered = preview?.kind === 'html' || preview?.kind === 'markdown'
   const canCopyText =
-    preview &&
-    preview.kind !== 'binary' &&
-    preview.kind !== 'image' &&
-    preview.content.length > 0
+    preview && preview.kind !== 'binary' && preview.kind !== 'image' && preview.content.length > 0
 
   const handleSaveAs = async () => {
     try {

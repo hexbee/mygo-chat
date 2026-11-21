@@ -30,21 +30,8 @@ export const SkillSparkleIcon = () => (
 
 export const CommandSlashIcon = () => (
   <svg width={15} height={15} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-    <rect
-      x={2}
-      y={2}
-      width={12}
-      height={12}
-      rx={3.5}
-      stroke="currentColor"
-      strokeWidth={1.3}
-    />
-    <path
-      d="M9.6 4.7L6.4 11.3"
-      stroke="currentColor"
-      strokeWidth={1.3}
-      strokeLinecap="round"
-    />
+    <rect x={2} y={2} width={12} height={12} rx={3.5} stroke="currentColor" strokeWidth={1.3} />
+    <path d="M9.6 4.7L6.4 11.3" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" />
   </svg>
 )
 

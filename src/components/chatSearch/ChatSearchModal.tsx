@@ -15,11 +15,7 @@ import {
   IconUserOutline10,
 } from '../base/icons.js'
 import { closeMobileSider } from '../sider/mobileSiderState.js'
-import {
-  closeChatSearch,
-  requestScrollToMessage,
-  useChatSearch,
-} from './chatSearchState.js'
+import { closeChatSearch, requestScrollToMessage, useChatSearch } from './chatSearchState.js'
 import styles from './ChatSearchModal.module.css'
 
 const HighlightedText = ({ text, query }: { text: string; query: string }) => (

@@ -124,9 +124,10 @@ export const McpSetting = () => {
   const t = useTranslate()
   const servers = useMCPStore((state) => state.servers)
   const statuses = useMCPStore((state) => state.statuses)
-  const [editing, setEditing] = useState<{ mode: 'add' | 'edit'; initial?: MCPServerConfig } | null>(
-    null
-  )
+  const [editing, setEditing] = useState<{
+    mode: 'add' | 'edit'
+    initial?: MCPServerConfig
+  } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({})
   const [probingServer, setProbingServer] = useState<Record<string, boolean>>({})
@@ -271,9 +272,7 @@ export const McpSetting = () => {
         />
       ) : null}
 
-      {importOpen ? (
-        <ImportJsonModal onClose={() => setImportOpen(false)} />
-      ) : null}
+      {importOpen ? <ImportJsonModal onClose={() => setImportOpen(false)} /> : null}
     </div>
   )
 }
@@ -362,18 +361,14 @@ const ServerCard = ({
       <div className={styles.cardHeader}>
         <div className={styles.cardTitleGroup}>
           <span className={styles.serverName}>{cfg.name}</span>
-          <span className={styles.badge}>
-            {cfg.transport === 'stdio' ? 'Stdio' : 'HTTP'}
-          </span>
+          <span className={styles.badge}>{cfg.transport === 'stdio' ? 'Stdio' : 'HTTP'}</span>
           <span className={styles.badge}>
             {cfg.toolLoading === 'eager' ? 'Eager' : 'On-demand'}
           </span>
           {cfg.trustServer ? (
             <span className={styles.badge}>{t('settingsMcpTrustedBadge')}</span>
           ) : null}
-          <span className={clsx(styles.statusBadge, statusMeta.className)}>
-            {statusMeta.label}
-          </span>
+          <span className={clsx(styles.statusBadge, statusMeta.className)}>{statusMeta.label}</span>
         </div>
         <button
           type="button"
@@ -391,10 +386,7 @@ const ServerCard = ({
       <div className={styles.cardBody}>
         {displayedEndpoint ? (
           <div className={styles.endpointRow}>
-            <div
-              className={styles.endpointText}
-              title={endpointVisible ? fullEndpoint : undefined}
-            >
+            <div className={styles.endpointText} title={endpointVisible ? fullEndpoint : undefined}>
               {displayedEndpoint}
             </div>
             {hasHiddenPart ? (
@@ -444,12 +436,7 @@ const ServerCard = ({
         ) : null}
 
         <div className={styles.cardActions}>
-          <button
-            type="button"
-            className={styles.smallBtn}
-            disabled={probing}
-            onClick={onProbe}
-          >
+          <button type="button" className={styles.smallBtn} disabled={probing} onClick={onProbe}>
             {probing ? t('settingsMcpProbing') : t('settingsMcpProbe')}
           </button>
           {toolCount > 0 ? (
@@ -460,12 +447,7 @@ const ServerCard = ({
             </button>
           ) : null}
           {cfg.enabled ? (
-            <button
-              type="button"
-              className={styles.smallBtn}
-              disabled={busy}
-              onClick={onRestart}
-            >
+            <button type="button" className={styles.smallBtn} disabled={busy} onClick={onRestart}>
               {t('settingsMcpRestart')}
             </button>
           ) : null}
@@ -587,9 +569,7 @@ const ServerFormModal = ({
       toolLoading,
       trustServer,
       toolCallTimeoutMs: Number.isFinite(parsedTimeout) ? parsedTimeout : 60000,
-      keepAliveMs: Number.isFinite(parsedKeepAlive)
-        ? parsedKeepAlive
-        : (initial?.keepAliveMs ?? 0),
+      keepAliveMs: Number.isFinite(parsedKeepAlive) ? parsedKeepAlive : (initial?.keepAliveMs ?? 0),
       reconnect: { ...(initial?.reconnect ?? {}), enabled: reconnectEnabled },
       ...(transport === 'streamable-http'
         ? {
@@ -667,12 +647,7 @@ const ServerFormModal = ({
             <Button variant="outlined" size="m" disabled={saving} onClick={onClose}>
               {t('cancel')}
             </Button>
-            <Button
-              variant="primary"
-              size="m"
-              disabled={saving}
-              onClick={() => void handleSave()}
-            >
+            <Button variant="primary" size="m" disabled={saving} onClick={() => void handleSave()}>
               {t('confirm')}
             </Button>
           </div>
@@ -708,10 +683,7 @@ const ServerFormModal = ({
             </button>
             <button
               type="button"
-              className={clsx(
-                styles.segmentBtn,
-                transport === 'stdio' && styles.segmentBtnActive
-              )}
+              className={clsx(styles.segmentBtn, transport === 'stdio' && styles.segmentBtnActive)}
               onClick={() => setTransport('stdio')}
             >
               Stdio
@@ -1112,12 +1084,7 @@ const ImportJsonModal = ({ onClose }: { onClose: () => void }) => {
             >
               {t('settingsMcpValidateJson')}
             </Button>
-            <Button
-              variant="primary"
-              size="m"
-              disabled={busy}
-              onClick={() => void handleApply()}
-            >
+            <Button variant="primary" size="m" disabled={busy} onClick={() => void handleApply()}>
               {t('settingsMcpApplyImport')}
             </Button>
           </div>

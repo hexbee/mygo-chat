@@ -245,10 +245,19 @@ export const settleReply = (
       if (reply.stopReason === 'refusal' && (block.type === 'thinking' || block.type === 'text')) {
         return []
       }
-      if (block.type === 'thinking' && block.startedAt !== undefined && block.endedAt === undefined) {
+      if (
+        block.type === 'thinking' &&
+        block.startedAt !== undefined &&
+        block.endedAt === undefined
+      ) {
         return [{ ...block, endedAt: now }]
       }
-      if (block.type === 'client_tool_use' && block.partialJson && Object.keys(block.input).length === 0 && !block.parseError) {
+      if (
+        block.type === 'client_tool_use' &&
+        block.partialJson &&
+        Object.keys(block.input).length === 0 &&
+        !block.parseError
+      ) {
         return [finalizeToolUseInput(block)]
       }
       return [block]

@@ -1,10 +1,6 @@
 import { memo } from 'react'
 import { useTranslate } from '../../i18n/index.js'
-import {
-  approveToolCall,
-  rejectToolCall,
-  type PendingApproval,
-} from '../../services/chat/store.js'
+import { approveToolCall, rejectToolCall, type PendingApproval } from '../../services/chat/store.js'
 import styles from './ApprovalCard.module.css'
 
 const extractHighlightTarget = (approval: PendingApproval): string => {

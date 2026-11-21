@@ -55,7 +55,11 @@ const getVisibleSelectionRects = (
   visBottom: number
 ): { first: DOMRect; last: DOMRect } | null => {
   const bounding = range.getBoundingClientRect()
-  if ((bounding.width === 0 && bounding.height === 0) || bounding.bottom <= visTop || bounding.top >= visBottom) {
+  if (
+    (bounding.width === 0 && bounding.height === 0) ||
+    bounding.bottom <= visTop ||
+    bounding.top >= visBottom
+  ) {
     return null
   }
 
