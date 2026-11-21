@@ -9,6 +9,9 @@ declare const styles: {
   readonly quoteTokenSpaced: string
   readonly quoteIcon: string
   readonly quoteLabel: string
+  readonly skillToken: string
+  readonly skillIcon: string
+  readonly skillLabel: string
   readonly bottom: string
   readonly alwaysShow: string
   readonly editor: string

@@ -22,6 +22,7 @@ export type DraftAttachment = {
 export type DraftSegment =
   | { type: 'text'; text: string }
   | { type: 'quote'; id: string; text: string }
+  | { type: 'skill'; id: string; name: string; kind?: 'skill' | 'command' }
 
 export type Draft = {
   text: string
@@ -45,6 +46,17 @@ export const serializeDraftSegments = (segments: DraftSegment[]): string => {
   for (const segment of segments) {
     if (segment.type === 'text') {
       result += segment.text
+      continue
+    }
+    if (segment.type === 'skill') {
+      const name = segment.name.trim()
+      if (!name) {
+        continue
+      }
+      if (result && !/\s$/.test(result)) {
+        result += ' '
+      }
+      result += `/${name}`
       continue
     }
     const quoted = segment.text.trim()
@@ -172,7 +184,7 @@ export const retryDraftAttachment = (
 }
 
 const toMessageSegments = (segments: DraftSegment[]): UserMessageSegment[] | undefined => {
-  if (!segments.some((segment) => segment.type === 'quote')) {
+  if (!segments.some((segment) => segment.type === 'quote' || segment.type === 'skill')) {
     return undefined
   }
   const normalized: UserMessageSegment[] = []
@@ -181,6 +193,13 @@ const toMessageSegments = (segments: DraftSegment[]): UserMessageSegment[] | und
       const text = segment.text.trim()
       if (text) {
         normalized.push({ type: 'quote', text })
+      }
+      continue
+    }
+    if (segment.type === 'skill') {
+      const name = segment.name.trim()
+      if (name) {
+        normalized.push({ type: 'skill', name, ...(segment.kind ? { kind: segment.kind } : {}) })
       }
       continue
     }

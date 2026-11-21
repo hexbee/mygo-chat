@@ -19,6 +19,10 @@ declare const styles: {
   readonly quoteGlyph: string
   readonly removeGlyph: string
   readonly quoteLabel: string
+  readonly skillToken: string
+  readonly skillIcon: string
+  readonly skillGlyph: string
+  readonly skillLabel: string
   readonly textareaHidden: string
   readonly functionRow: string
   readonly toggles: string

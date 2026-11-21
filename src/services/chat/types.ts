@@ -37,6 +37,7 @@ type MessageBranch = {
 export type UserMessageSegment =
   | { type: 'text'; text: string }
   | { type: 'quote'; text: string }
+  | { type: 'skill'; name: string; kind?: 'skill' | 'command' }
 
 export type UserMessage = MessageBranch & {
   id: string

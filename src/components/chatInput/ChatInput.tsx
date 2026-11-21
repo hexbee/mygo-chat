@@ -36,21 +36,29 @@ import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
 import { refreshSkills, useSkillStore } from '../../services/skills/store.js'
 import { useWorkspaceStore } from '../../services/workspace/store.js'
-import type { SkillSummary } from '../../mygo.js'
 import { ModelPicker } from './ModelPicker.js'
 import { PermissionPicker } from './PermissionPicker.js'
-import { SlashSkillMenu } from './SlashSkillMenu.js'
+import {
+  SlashSkillMenu,
+  type SlashCommandItem,
+  type SlashMenuItem,
+} from './SlashSkillMenu.js'
 import { WorkspacePicker } from './WorkspacePicker.js'
 import {
+  getSlashMatchAtCaret,
   handleAtomicQuoteDeletion,
+  handleHorizontalTokenNavigation,
   insertPlainTextAtRange,
   insertQuoteAtRange,
   isCaretAtEnd,
   isCaretAtStart,
   moveCaretToEnd,
   parseEditorSegments,
+  placeCaretBeforeLeadingTokenIfClicked,
   removeQuoteToken,
   renderEditorSegments,
+  replaceSlashWithSkillToken,
+  type SlashCaretMatch,
 } from './quoteEditor.js'
 import { useTranslate } from '../../i18n/index.js'
 import styles from './ChatInput.module.css'
@@ -61,6 +69,10 @@ const QUOTE_CLASSES = {
   quoteGlyph: styles.quoteGlyph,
   removeGlyph: styles.removeGlyph,
   label: styles.quoteLabel,
+  skillToken: styles.skillToken,
+  skillIcon: styles.skillIcon,
+  skillGlyph: styles.skillGlyph,
+  skillLabel: styles.skillLabel,
 }
 
 /** 输入框：自适应高度的富文本输入框（支持内联多引用） + 文件 + 深度思考与智能搜索开关 + 语音输入 + 发送 / 停止 */
@@ -89,14 +101,18 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const savedDraftRef = useRef<DraftSegment[]>([])
   const savedRangeRef = useRef<Range | null>(null)
   const composingRef = useRef(false)
+  const [composing, setComposing] = useState(false)
   const lastSyncedSegmentsRef = useRef<DraftSegment[] | null>(null)
+  const [slashMatch, setSlashMatch] = useState<SlashCaretMatch | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
   const [slashDismissed, setSlashDismissed] = useState(false)
   const skills = useSkillStore((state) => state.skills)
   const workspaces = useWorkspaceStore((state) => state.workspaces)
   const draftWorkspaceId = useWorkspaceStore((state) => state.draftWorkspaceId)
   const activeSession = useChatStore((state) =>
-    sessionId ? state.sessionCache[sessionId] ?? state.sessions.find((s) => s.id === sessionId) : undefined
+    sessionId
+      ? (state.sessionCache[sessionId] ?? state.sessions.find((s) => s.id === sessionId))
+      : undefined
   )
   const activeWorkspaceId = sessionId ? (activeSession?.workspaceId ?? null) : draftWorkspaceId
   const activeWorkdir =
@@ -106,16 +122,12 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     void refreshSkills(activeWorkdir)
   }, [activeWorkdir])
 
-  const slashQuery = useMemo(() => {
-    if (segments.some((s) => s.type === 'quote')) {
-      return null
-    }
-    const raw = draft.text
-    if (!raw.startsWith('/') || /\s/.test(raw)) {
-      return null
-    }
-    return raw.slice(1).toLowerCase()
-  }, [draft.text, segments])
+  const slashQuery = slashMatch ? slashMatch.query : null
+
+  const slashCommands = useMemo<SlashCommandItem[]>(
+    () => [{ name: 'compact', description: t('slashCommandCompactDesc') }],
+    [t]
+  )
 
   const matchingSkills = useMemo(() => {
     if (slashQuery === null || slashDismissed) {
@@ -131,24 +143,32 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     )
   }, [skills, slashQuery, slashDismissed])
 
+  const matchingCommands = useMemo(() => {
+    if (slashQuery === null || slashDismissed) {
+      return []
+    }
+    if (!slashQuery) {
+      return slashCommands
+    }
+    return slashCommands.filter(
+      (cmd) =>
+        cmd.name.toLowerCase().includes(slashQuery) ||
+        cmd.description.toLowerCase().includes(slashQuery)
+    )
+  }, [slashCommands, slashQuery, slashDismissed])
+
+  const slashItems = useMemo<SlashMenuItem[]>(
+    () => [
+      ...matchingSkills.map((skill): SlashMenuItem => ({ kind: 'skill', skill })),
+      ...matchingCommands.map((command): SlashMenuItem => ({ kind: 'command', command })),
+    ],
+    [matchingSkills, matchingCommands]
+  )
+
   useEffect(() => {
     setSlashDismissed(false)
     setSlashIndex(0)
   }, [slashQuery])
-
-  const selectSlashSkill = useCallback(
-    (skill: SkillSummary) => {
-      setSlashDismissed(true)
-      setDraftText(sessionId, `/${skill.name} `)
-      requestAnimationFrame(() => {
-        if (editorRef.current) {
-          editorRef.current.focus({ preventScroll: true })
-          moveCaretToEnd(editorRef.current)
-        }
-      })
-    },
-    [sessionId]
-  )
 
   const syncFromDom = useCallback(() => {
     const editor = editorRef.current
@@ -158,7 +178,39 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     const nextSegments = parseEditorSegments(editor)
     lastSyncedSegmentsRef.current = nextSegments
     setDraftSegments(sessionId, nextSegments)
+    setSlashMatch(getSlashMatchAtCaret(editor))
   }, [sessionId])
+
+  const selectSlashItem = useCallback(
+    (item: SlashMenuItem) => {
+      const editor = editorRef.current
+      if (!editor) {
+        return
+      }
+      const name = item.kind === 'skill' ? item.skill.name : item.command.name
+      const kind = item.kind
+      const liveMatch = slashMatch ?? getSlashMatchAtCaret(editor)
+      setSlashDismissed(true)
+      setSlashMatch(null)
+      if (liveMatch) {
+        savedRangeRef.current = replaceSlashWithSkillToken(
+          editor,
+          liveMatch,
+          createId(),
+          name,
+          QUOTE_CLASSES,
+          kind
+        )
+        syncFromDom()
+      } else {
+        setDraftSegments(sessionId, [
+          { type: 'skill', id: createId(), name, kind },
+          { type: 'text', text: ' ' },
+        ])
+      }
+    },
+    [sessionId, slashMatch, syncFromDom]
+  )
 
   const getUserMessagesHistory = useCallback((): DraftSegment[][] => {
     if (!sessionId) {
@@ -177,7 +229,9 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             m.segments.map((segment) =>
               segment.type === 'quote'
                 ? { type: 'quote', id: createId(), text: segment.text }
-                : { type: 'text', text: segment.text }
+                : segment.type === 'skill'
+                  ? { type: 'skill', id: createId(), name: segment.name, kind: segment.kind }
+                  : { type: 'text', text: segment.text }
             )
           )
         } else {
@@ -218,6 +272,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       const range = selection.getRangeAt(0)
       if (editor.contains(range.startContainer) && editor.contains(range.endContainer)) {
         savedRangeRef.current = range.cloneRange()
+        setSlashMatch(getSlashMatchAtCaret(editor))
       }
     }
     document.addEventListener('selectionchange', onSelectionChange)
@@ -353,8 +408,10 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     >
       <SlashSkillMenu
         skills={matchingSkills}
-        selectedIndex={Math.min(slashIndex, Math.max(0, matchingSkills.length - 1))}
-        onSelect={selectSlashSkill}
+        commands={matchingCommands}
+        query={slashQuery ?? ''}
+        selectedIndex={Math.min(slashIndex, Math.max(0, slashItems.length - 1))}
+        onSelect={selectSlashItem}
         onHover={setSlashIndex}
       />
       <WorkspacePicker sessionId={sessionId} disabled={importingHistory} />
@@ -369,13 +426,15 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           contentEditable={!importingHistory}
           suppressContentEditableWarning
           data-placeholder={t('chatInputPlaceholderChat')}
-          data-empty={isEmpty ? 'true' : undefined}
+          data-empty={isEmpty && !composing ? 'true' : undefined}
           className={clsx(styles.editor, recording && isMobile && styles.textareaHidden)}
           onCompositionStart={() => {
             composingRef.current = true
+            setComposing(true)
           }}
           onCompositionEnd={() => {
             composingRef.current = false
+            setComposing(false)
             historyIndexRef.current = -1
             syncFromDom()
           }}
@@ -387,11 +446,11 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             syncFromDom()
           }}
           onMouseDown={(event) => {
-            const removeButton = (event.target as Element | null)?.closest(
+            const removeQuoteBtn = (event.target as Element | null)?.closest(
               '[data-quote-remove="true"]'
             )
-            if (removeButton && editorRef.current) {
-              const token = removeButton.closest<HTMLElement>('[data-quote-id]')
+            if (removeQuoteBtn && editorRef.current) {
+              const token = removeQuoteBtn.closest<HTMLElement>('[data-quote-id]')
               if (token) {
                 event.preventDefault()
                 historyIndexRef.current = -1
@@ -399,6 +458,27 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
                 syncFromDom()
                 return
               }
+            }
+            const removeSkillBtn = (event.target as Element | null)?.closest(
+              '[data-skill-remove="true"]'
+            )
+            if (removeSkillBtn && editorRef.current) {
+              const token = removeSkillBtn.closest<HTMLElement>('[data-skill-id]')
+              if (token) {
+                event.preventDefault()
+                historyIndexRef.current = -1
+                savedRangeRef.current = removeQuoteToken(editorRef.current, token)
+                syncFromDom()
+                return
+              }
+            }
+            if (
+              event.button === 0 &&
+              editorRef.current &&
+              placeCaretBeforeLeadingTokenIfClicked(editorRef.current, event.clientX, event.clientY)
+            ) {
+              event.preventDefault()
+              return
             }
             // 首次点击时手动聚焦，避免 Safari 把整个页面滚到输入框位置。
             if (isMobile && event.button === 0 && document.activeElement !== event.currentTarget) {
@@ -409,6 +489,25 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing || composingRef.current) {
               return
+            }
+
+            if (
+              (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+              !event.shiftKey &&
+              !event.altKey &&
+              !event.metaKey &&
+              !event.ctrlKey &&
+              editorRef.current
+            ) {
+              if (
+                handleHorizontalTokenNavigation(
+                  editorRef.current,
+                  event.key === 'ArrowLeft' ? 'left' : 'right'
+                )
+              ) {
+                event.preventDefault()
+                return
+              }
             }
 
             if (event.key === 'Backspace' && editorRef.current) {
@@ -429,15 +528,15 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               }
             }
 
-            if (matchingSkills.length > 0) {
+            if (slashItems.length > 0) {
               if (event.key === 'ArrowDown') {
                 event.preventDefault()
-                setSlashIndex((prev) => (prev + 1) % matchingSkills.length)
+                setSlashIndex((prev) => (prev + 1) % slashItems.length)
                 return
               }
               if (event.key === 'ArrowUp') {
                 event.preventDefault()
-                setSlashIndex((prev) => (prev - 1 + matchingSkills.length) % matchingSkills.length)
+                setSlashIndex((prev) => (prev - 1 + slashItems.length) % slashItems.length)
                 return
               }
               if (event.key === 'Escape') {
@@ -447,9 +546,9 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               }
               if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
                 event.preventDefault()
-                const chosen = matchingSkills[Math.min(slashIndex, matchingSkills.length - 1)]
+                const chosen = slashItems[Math.min(slashIndex, slashItems.length - 1)]
                 if (chosen) {
-                  selectSlashSkill(chosen)
+                  selectSlashItem(chosen)
                 }
                 return
               }

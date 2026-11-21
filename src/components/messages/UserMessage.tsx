@@ -28,6 +28,28 @@ const QuoteMarkIcon = () => (
   </svg>
 )
 
+const SkillBadgeIcon = () => (
+  <svg width={15} height={15} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path
+      d="M6.8 1.8L8.05 5.45L11.7 6.7L8.05 7.95L6.8 11.6L5.55 7.95L1.9 6.7L5.55 5.45L6.8 1.8Z"
+      stroke="currentColor"
+      strokeWidth={1.3}
+      strokeLinejoin="round"
+    />
+    <path
+      d="M12.3 9.7L12.9 11.4L14.6 12L12.9 12.6L12.3 14.3L11.7 12.6L10 12L11.7 11.4L12.3 9.7Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
+const CommandBadgeIcon = () => (
+  <svg width={15} height={15} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <rect x={2} y={2} width={12} height={12} rx={3.5} stroke="currentColor" strokeWidth={1.3} />
+    <path d="M9.6 4.7L6.4 11.3" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" />
+  </svg>
+)
+
 export const UserMessage = memo(function UserMessage({
   sessionId,
   message,
@@ -142,6 +164,13 @@ export const UserMessage = memo(function UserMessage({
                         <span className={styles.quoteLabel}>
                           {formatQuoteDisplay(segment.text)}
                         </span>
+                      </span>
+                    ) : segment.type === 'skill' ? (
+                      <span key={index} className={styles.skillToken}>
+                        <span className={styles.skillIcon} aria-hidden="true">
+                          {segment.kind === 'command' ? <CommandBadgeIcon /> : <SkillBadgeIcon />}
+                        </span>
+                        <span className={styles.skillLabel}>{segment.name}</span>
                       </span>
                     ) : (
                       <span key={index}>{segment.text}</span>

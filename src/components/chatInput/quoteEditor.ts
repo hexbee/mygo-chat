@@ -6,11 +6,26 @@ export type QuoteTokenClasses = {
   quoteGlyph: string
   removeGlyph: string
   label: string
+  skillToken: string
+  skillIcon: string
+  skillGlyph: string
+  skillLabel: string
 }
 
-/** 展示宽度上限（全角/中文按 1 计，半角/ASCII 按 0.5 计），超出后显示省略号 */ 
+export type SlashCaretMatch = {
+  query: string
+  textNode: Text
+  slashOffset: number
+  endOffset: number
+}
+
+/** 展示宽度上限（全角/中文按 1 计，半角/ASCII 按 0.5 计），超出后显示省略号 */
 const MAX_QUOTE_DISPLAY_WIDTH = 20
 const SVG_NS = 'http://www.w3.org/2000/svg'
+/** WebKit 在 contenteditable="false" 节点前需要一个可编辑文本槽位才能落入光标 */
+const CARET_ANCHOR = '\u200B'
+
+const stripCaretAnchors = (value: string): string => value.replace(/\u200B/g, '')
 
 /** 压缩换行与多余空白，超出长度上限时以省略号截断展示（完整原文保留在 data-quote-text 中） */
 export const formatQuoteDisplay = (text: string): string => {
@@ -43,6 +58,61 @@ const createQuoteIconSvg = (): SVGSVGElement => {
   )
   path.setAttribute('fill', 'currentColor')
   svg.appendChild(path)
+  return svg
+}
+
+const createSkillIconSvg = (): SVGSVGElement => {
+  const svg = document.createElementNS(SVG_NS, 'svg')
+  svg.setAttribute('width', '15')
+  svg.setAttribute('height', '15')
+  svg.setAttribute('viewBox', '0 0 16 16')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('aria-hidden', 'true')
+
+  const mainStar = document.createElementNS(SVG_NS, 'path')
+  mainStar.setAttribute(
+    'd',
+    'M6.8 1.8L8.05 5.45L11.7 6.7L8.05 7.95L6.8 11.6L5.55 7.95L1.9 6.7L5.55 5.45L6.8 1.8Z'
+  )
+  mainStar.setAttribute('stroke', 'currentColor')
+  mainStar.setAttribute('stroke-width', '1.3')
+  mainStar.setAttribute('stroke-linejoin', 'round')
+  svg.appendChild(mainStar)
+
+  const smallStar = document.createElementNS(SVG_NS, 'path')
+  smallStar.setAttribute(
+    'd',
+    'M12.3 9.7L12.9 11.4L14.6 12L12.9 12.6L12.3 14.3L11.7 12.6L10 12L11.7 11.4L12.3 9.7Z'
+  )
+  smallStar.setAttribute('fill', 'currentColor')
+  svg.appendChild(smallStar)
+  return svg
+}
+
+const createCommandIconSvg = (): SVGSVGElement => {
+  const svg = document.createElementNS(SVG_NS, 'svg')
+  svg.setAttribute('width', '15')
+  svg.setAttribute('height', '15')
+  svg.setAttribute('viewBox', '0 0 16 16')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('aria-hidden', 'true')
+
+  const box = document.createElementNS(SVG_NS, 'rect')
+  box.setAttribute('x', '2')
+  box.setAttribute('y', '2')
+  box.setAttribute('width', '12')
+  box.setAttribute('height', '12')
+  box.setAttribute('rx', '3.5')
+  box.setAttribute('stroke', 'currentColor')
+  box.setAttribute('stroke-width', '1.3')
+  svg.appendChild(box)
+
+  const slash = document.createElementNS(SVG_NS, 'path')
+  slash.setAttribute('d', 'M9.6 4.7L6.4 11.3')
+  slash.setAttribute('stroke', 'currentColor')
+  slash.setAttribute('stroke-width', '1.3')
+  slash.setAttribute('stroke-linecap', 'round')
+  svg.appendChild(slash)
   return svg
 }
 
@@ -103,25 +173,73 @@ export const createQuoteTokenElement = (
   return token
 }
 
-/** 点击引用上的叉叉删除该引用节点，同时保留其他已输入文字 */
+export const createSkillTokenElement = (
+  id: string,
+  name: string,
+  classes: QuoteTokenClasses,
+  kind: 'skill' | 'command' = 'skill'
+): HTMLSpanElement => {
+  const token = document.createElement('span')
+  token.className = classes.skillToken
+  token.contentEditable = 'false'
+  token.dataset.skillId = id
+  token.dataset.skillName = name
+  token.dataset.skillKind = kind
+
+  const icon = document.createElement('span')
+  icon.className = classes.skillIcon
+  icon.dataset.skillRemove = 'true'
+  icon.setAttribute('role', 'button')
+  icon.setAttribute('aria-label', `Remove ${kind} ${name}`)
+
+  const skillGlyph = document.createElement('span')
+  skillGlyph.className = classes.skillGlyph
+  skillGlyph.setAttribute('aria-hidden', 'true')
+  skillGlyph.appendChild(kind === 'command' ? createCommandIconSvg() : createSkillIconSvg())
+
+  const removeGlyph = document.createElement('span')
+  removeGlyph.className = classes.removeGlyph
+  removeGlyph.setAttribute('aria-hidden', 'true')
+  removeGlyph.appendChild(createRemoveIconSvg())
+
+  icon.appendChild(skillGlyph)
+  icon.appendChild(removeGlyph)
+
+  const label = document.createElement('span')
+  label.className = classes.skillLabel
+  label.textContent = name
+
+  token.appendChild(icon)
+  token.appendChild(label)
+  return token
+}
+
+/** 点击引用或技能胶囊上的叉叉删除该节点，同时保留其他已输入文字 */
 export const removeQuoteToken = (root: HTMLElement, token: HTMLElement): Range | null => {
   if (!root.contains(token)) {
     return null
   }
   const prev = token.previousSibling
   const next = token.nextSibling
+  const prevAnchor =
+    prev?.nodeType === Node.TEXT_NODE && prev.nodeValue === CARET_ANCHOR ? prev : null
 
   const range = document.createRange()
-  range.setStartBefore(token)
+  range.setStartBefore(prevAnchor ?? token)
   range.collapse(true)
 
   token.remove()
+  prevAnchor?.remove()
 
-  // 仅清理紧跟在被删引用后的单个自动空格（若其处于开头或前方已有空白），其余文本原样保留
+  // 仅清理紧跟在被删节点后的单个自动空格（若其处于开头或前方已有空白），其余文本原样保留
   if (next?.nodeType === Node.TEXT_NODE) {
     const nextVal = next.nodeValue ?? ''
+    const beforeNode = prevAnchor ? prevAnchor.previousSibling : prev
     const prevEndsWithSpace =
-      !prev || (prev.nodeType === Node.TEXT_NODE && (prev.nodeValue === '' || /\s$/.test(prev.nodeValue ?? '')))
+      !beforeNode ||
+      (beforeNode.nodeType === Node.TEXT_NODE &&
+        (stripCaretAnchors(beforeNode.nodeValue ?? '') === '' ||
+          /\s$/.test(stripCaretAnchors(beforeNode.nodeValue ?? ''))))
     if (prevEndsWithSpace && nextVal.startsWith(' ')) {
       next.nodeValue = nextVal.slice(1)
       if (next.nodeValue === '') {
@@ -141,6 +259,12 @@ export const removeQuoteToken = (root: HTMLElement, token: HTMLElement): Range |
 
 const isQuoteElement = (node: Node | null): boolean =>
   node instanceof HTMLElement && typeof node.dataset.quoteId === 'string'
+
+const isSkillElement = (node: Node | null): boolean =>
+  node instanceof HTMLElement && typeof node.dataset.skillId === 'string'
+
+const isInlineTokenElement = (node: Node | null): node is HTMLElement =>
+  isQuoteElement(node) || isSkillElement(node)
 
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI'])
 
@@ -162,7 +286,7 @@ export const parseEditorSegments = (root: HTMLElement): DraftSegment[] => {
 
   const walk = (node: Node, isRootChild: boolean, index: number) => {
     if (node.nodeType === Node.TEXT_NODE) {
-      pushTextSegment(segments, node.nodeValue ?? '')
+      pushTextSegment(segments, stripCaretAnchors(node.nodeValue ?? ''))
       return
     }
     if (!(node instanceof HTMLElement)) {
@@ -173,6 +297,15 @@ export const parseEditorSegments = (root: HTMLElement): DraftSegment[] => {
       const text = node.dataset.quoteText ?? ''
       if (text) {
         segments.push({ type: 'quote', id, text })
+      }
+      return
+    }
+    if (isSkillElement(node)) {
+      const id = node.dataset.skillId ?? ''
+      const name = node.dataset.skillName ?? ''
+      const kind = node.dataset.skillKind === 'command' ? 'command' : 'skill'
+      if (name) {
+        segments.push({ type: 'skill', id, name, kind })
       }
       return
     }
@@ -209,8 +342,16 @@ export const renderEditorSegments = (
 ) => {
   root.replaceChildren()
   for (const segment of segments) {
-    if (segment.type === 'quote') {
-      root.appendChild(createQuoteTokenElement(segment.id, segment.text, classes))
+    if (segment.type === 'quote' || segment.type === 'skill') {
+      const prev = root.lastChild
+      if (!prev || prev.nodeType !== Node.TEXT_NODE) {
+        root.appendChild(document.createTextNode(CARET_ANCHOR))
+      }
+      root.appendChild(
+        segment.type === 'quote'
+          ? createQuoteTokenElement(segment.id, segment.text, classes)
+          : createSkillTokenElement(segment.id, segment.name, classes, segment.kind ?? 'skill')
+      )
       continue
     }
     const lines = segment.text.split('\n')
@@ -238,36 +379,117 @@ export const moveCaretToEnd = (root: HTMLElement) => {
 }
 
 const isRangeInsideRoot = (range: Range | null, root: HTMLElement): range is Range =>
-  Boolean(
-    range &&
-      root.contains(range.startContainer) &&
-      root.contains(range.endContainer)
-  )
+  Boolean(range && root.contains(range.startContainer) && root.contains(range.endContainer))
+
+/** 检测当前光标前是否正在输入 `/skill-prefix`（支持句首与句中任意位置） */
+export const getSlashMatchAtCaret = (root: HTMLElement): SlashCaretMatch | null => {
+  const selection = window.getSelection()
+  if (!selection || !selection.isCollapsed || selection.rangeCount === 0) {
+    return null
+  }
+  const range = selection.getRangeAt(0)
+  if (!isRangeInsideRoot(range, root)) {
+    return null
+  }
+  let textNode: Text | null = null
+  let endOffset = 0
+  if (range.startContainer.nodeType === Node.TEXT_NODE) {
+    textNode = range.startContainer as Text
+    endOffset = range.startOffset
+  } else if (range.startContainer === root && range.startOffset > 0) {
+    const prev = root.childNodes[range.startOffset - 1]
+    if (prev?.nodeType === Node.TEXT_NODE) {
+      textNode = prev as Text
+      endOffset = (textNode.nodeValue ?? '').length
+    }
+  }
+  if (!textNode) {
+    return null
+  }
+  const before = (textNode.nodeValue ?? '').slice(0, endOffset)
+  const match = before.match(/(?:^|[\s\u200B])\/([A-Za-z0-9._-]*)$/)
+  if (!match) {
+    return null
+  }
+  const query = match[1]
+  const slashOffset = endOffset - query.length - 1
+  return {
+    query: query.toLowerCase(),
+    textNode,
+    slashOffset,
+    endOffset,
+  }
+}
+
+/** 将当前光标处的 `/query` 替换为内联技能胶囊，并在其后插入空格方便继续输入 */
+export const replaceSlashWithSkillToken = (
+  root: HTMLElement,
+  match: SlashCaretMatch,
+  id: string,
+  name: string,
+  classes: QuoteTokenClasses,
+  kind: 'skill' | 'command' = 'skill'
+): Range | null => {
+  if (!root.contains(match.textNode)) {
+    return null
+  }
+  const range = document.createRange()
+  range.setStart(match.textNode, match.slashOffset)
+  range.setEnd(match.textNode, match.endOffset)
+  range.deleteContents()
+
+  const token = createSkillTokenElement(id, name, classes, kind)
+  const trailingSpace = document.createTextNode(' ')
+  const fragment = document.createDocumentFragment()
+  // 句首或紧邻其他内联节点时，在胶囊前放置零宽锚点，确保 WebKit 光标可移至胶囊最左侧。
+  if (
+    match.slashOffset === 0 &&
+    (!match.textNode.previousSibling || match.textNode.previousSibling.nodeType !== Node.TEXT_NODE)
+  ) {
+    fragment.appendChild(document.createTextNode(CARET_ANCHOR))
+  }
+  fragment.appendChild(token)
+  fragment.appendChild(trailingSpace)
+
+  range.insertNode(fragment)
+
+  const nextRange = document.createRange()
+  nextRange.setStart(trailingSpace, trailingSpace.length)
+  nextRange.collapse(true)
+
+  root.focus({ preventScroll: true })
+  const selection = window.getSelection()
+  if (selection) {
+    selection.removeAllRanges()
+    selection.addRange(nextRange)
+  }
+  return nextRange.cloneRange()
+}
 
 const needsLeadingSpace = (root: HTMLElement, range: Range): boolean => {
   const { startContainer, startOffset } = range
   if (startContainer.nodeType === Node.TEXT_NODE) {
-    const before = (startContainer.nodeValue ?? '').slice(0, startOffset)
+    const before = stripCaretAnchors((startContainer.nodeValue ?? '').slice(0, startOffset))
     if (before.length > 0) {
       return !/\s$/.test(before)
     }
     const prev = startContainer.previousSibling
-    if (isQuoteElement(prev)) {
+    if (isInlineTokenElement(prev)) {
       return true
     }
     if (prev?.nodeType === Node.TEXT_NODE) {
-      const value = prev.nodeValue ?? ''
+      const value = stripCaretAnchors(prev.nodeValue ?? '')
       return value.length > 0 && !/\s$/.test(value)
     }
     return false
   }
   if (startContainer === root && startOffset > 0) {
     const prev = root.childNodes[startOffset - 1]
-    if (isQuoteElement(prev)) {
+    if (isInlineTokenElement(prev)) {
       return true
     }
     if (prev?.nodeType === Node.TEXT_NODE) {
-      const value = prev.nodeValue ?? ''
+      const value = stripCaretAnchors(prev.nodeValue ?? '')
       return value.length > 0 && !/\s$/.test(value)
     }
   }
@@ -310,6 +532,8 @@ export const insertQuoteAtRange = (
   const fragment = document.createDocumentFragment()
   if (addSpaceBefore) {
     fragment.appendChild(document.createTextNode(' '))
+  } else if (range.startOffset === 0) {
+    fragment.appendChild(document.createTextNode(CARET_ANCHOR))
   }
   fragment.appendChild(token)
   fragment.appendChild(trailingSpace)
@@ -392,8 +616,130 @@ export const insertPlainTextAtRange = (
   return nextRange.cloneRange()
 }
 
+const ensureTextSlotBefore = (token: HTMLElement): Text => {
+  const prev = token.previousSibling
+  if (prev?.nodeType === Node.TEXT_NODE) {
+    return prev as Text
+  }
+  const anchor = document.createTextNode(CARET_ANCHOR)
+  token.parentNode?.insertBefore(anchor, token)
+  return anchor
+}
+
+const ensureTextSlotAfter = (token: HTMLElement): Text => {
+  const next = token.nextSibling
+  if (next?.nodeType === Node.TEXT_NODE) {
+    return next as Text
+  }
+  const anchor = document.createTextNode(CARET_ANCHOR)
+  token.parentNode?.insertBefore(anchor, token.nextSibling)
+  return anchor
+}
+
+const findAdjacentInlineToken = (
+  root: HTMLElement,
+  range: Range,
+  direction: 'backward' | 'forward'
+): HTMLElement | null => {
+  const { startContainer, startOffset } = range
+  if (direction === 'backward') {
+    if (startContainer === root && startOffset > 0) {
+      const prev = root.childNodes[startOffset - 1]
+      return isInlineTokenElement(prev) ? prev : null
+    }
+    if (startContainer.nodeType === Node.TEXT_NODE) {
+      const before = stripCaretAnchors((startContainer.nodeValue ?? '').slice(0, startOffset))
+      if (before.length === 0) {
+        const prev = startContainer.previousSibling
+        return isInlineTokenElement(prev) ? prev : null
+      }
+    }
+    return null
+  }
+  if (startContainer === root && startOffset < root.childNodes.length) {
+    const next = root.childNodes[startOffset]
+    return isInlineTokenElement(next) ? next : null
+  }
+  if (startContainer.nodeType === Node.TEXT_NODE) {
+    const after = stripCaretAnchors((startContainer.nodeValue ?? '').slice(startOffset))
+    if (after.length === 0) {
+      const next = startContainer.nextSibling
+      return isInlineTokenElement(next) ? next : null
+    }
+  }
+  return null
+}
+
+/** 使用左右方向键跨越内联胶囊，确保光标能顺滑移到句首胶囊最左侧 */
+export const handleHorizontalTokenNavigation = (
+  root: HTMLElement,
+  direction: 'left' | 'right'
+): boolean => {
+  const selection = window.getSelection()
+  if (!selection || !selection.isCollapsed || selection.rangeCount === 0) {
+    return false
+  }
+  const range = selection.getRangeAt(0)
+  if (!isRangeInsideRoot(range, root)) {
+    return false
+  }
+  const token = findAdjacentInlineToken(root, range, direction === 'left' ? 'backward' : 'forward')
+  if (!token) {
+    return false
+  }
+  const nextRange = document.createRange()
+  if (direction === 'left') {
+    const slot = ensureTextSlotBefore(token)
+    const len = (slot.nodeValue ?? '').length
+    nextRange.setStart(slot, slot.nodeValue === CARET_ANCHOR ? 0 : len)
+  } else {
+    const slot = ensureTextSlotAfter(token)
+    nextRange.setStart(slot, slot.nodeValue === CARET_ANCHOR ? 1 : 0)
+  }
+  nextRange.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(nextRange)
+  return true
+}
+
+/** 点击首行最左侧空白（首个胶囊之前）时将光标放到句首 */
+export const placeCaretBeforeLeadingTokenIfClicked = (
+  root: HTMLElement,
+  clientX: number,
+  clientY: number
+): boolean => {
+  const firstToken = Array.from(root.childNodes).find((node) => isInlineTokenElement(node))
+  if (!firstToken || !isInlineTokenElement(firstToken)) {
+    return false
+  }
+  // 仅当首个胶囊之前没有可见文字时生效
+  for (let n = root.firstChild; n && n !== firstToken; n = n.nextSibling) {
+    if (n.nodeType === Node.TEXT_NODE && stripCaretAnchors(n.nodeValue ?? '').length > 0) {
+      return false
+    }
+    if (n.nodeType !== Node.TEXT_NODE) {
+      return false
+    }
+  }
+  const rect = firstToken.getBoundingClientRect()
+  if (clientX <= rect.left + 4 && clientY >= rect.top - 8 && clientY <= rect.bottom + 8) {
+    const slot = ensureTextSlotBefore(firstToken)
+    const range = document.createRange()
+    range.setStart(slot, 0)
+    range.collapse(true)
+    root.focus({ preventScroll: true })
+    const selection = window.getSelection()
+    if (selection) {
+      selection.removeAllRanges()
+      selection.addRange(range)
+    }
+    return true
+  }
+  return false
+}
+
 /**
- * 在引用节点紧邻处按 Backspace / Delete 时，整体删除该引用节点，
+ * 在引用或技能胶囊紧邻处按 Backspace / Delete 时，整体删除该节点，
  * 避免不同浏览器对 contenteditable="false" 的删除行为不一致。
  */
 export const handleAtomicQuoteDeletion = (
@@ -408,46 +754,22 @@ export const handleAtomicQuoteDeletion = (
   if (!isRangeInsideRoot(range, root)) {
     return false
   }
-  const { startContainer, startOffset } = range
-  let target: HTMLElement | null = null
-
-  if (direction === 'backward') {
-    if (startContainer === root && startOffset > 0) {
-      const prev = root.childNodes[startOffset - 1]
-      if (prev instanceof HTMLElement && isQuoteElement(prev)) {
-        target = prev
-      }
-    } else if (startContainer.nodeType === Node.TEXT_NODE && startOffset === 0) {
-      const prev = startContainer.previousSibling
-      if (prev instanceof HTMLElement && isQuoteElement(prev)) {
-        target = prev
-      }
-    }
-  } else {
-    if (startContainer === root && startOffset < root.childNodes.length) {
-      const next = root.childNodes[startOffset]
-      if (next instanceof HTMLElement && isQuoteElement(next)) {
-        target = next
-      }
-    } else if (
-      startContainer.nodeType === Node.TEXT_NODE &&
-      startOffset === (startContainer.nodeValue ?? '').length
-    ) {
-      const next = startContainer.nextSibling
-      if (next instanceof HTMLElement && isQuoteElement(next)) {
-        target = next
-      }
-    }
-  }
-
+  const target = findAdjacentInlineToken(root, range, direction)
   if (!target) {
     return false
   }
 
+  const prevAnchor =
+    target.previousSibling?.nodeType === Node.TEXT_NODE &&
+    target.previousSibling.nodeValue === CARET_ANCHOR
+      ? target.previousSibling
+      : null
+
   const nextRange = document.createRange()
-  nextRange.setStartBefore(target)
+  nextRange.setStartBefore(prevAnchor ?? target)
   nextRange.collapse(true)
   target.remove()
+  prevAnchor?.remove()
   selection.removeAllRanges()
   selection.addRange(nextRange)
   return true
@@ -465,11 +787,11 @@ export const isCaretAtStart = (root: HTMLElement): boolean => {
   const probe = document.createRange()
   probe.setStart(root, 0)
   probe.setEnd(range.startContainer, range.startOffset)
-  if (probe.toString().length > 0) {
+  if (stripCaretAnchors(probe.toString()).length > 0) {
     return false
   }
   const fragment = probe.cloneContents()
-  return fragment.querySelector('[data-quote-id], br') === null
+  return fragment.querySelector('[data-quote-id], [data-skill-id], br') === null
 }
 
 export const isCaretAtEnd = (root: HTMLElement): boolean => {
@@ -484,9 +806,9 @@ export const isCaretAtEnd = (root: HTMLElement): boolean => {
   const probe = document.createRange()
   probe.setStart(range.endContainer, range.endOffset)
   probe.setEnd(root, root.childNodes.length)
-  if (probe.toString().length > 0) {
+  if (stripCaretAnchors(probe.toString()).length > 0) {
     return false
   }
   const fragment = probe.cloneContents()
-  return fragment.querySelector('[data-quote-id], br') === null
+  return fragment.querySelector('[data-quote-id], [data-skill-id], br') === null
 }

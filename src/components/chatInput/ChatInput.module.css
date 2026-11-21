@@ -1,6 +1,7 @@
 .wrapper {
   --line-height: 24px;
   --input-padding-top: 12px;
+  position: relative;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -11,7 +12,7 @@
   border-radius: 24px;
   border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
   background: var(--dsw-specific-input-major);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .session {
@@ -191,6 +192,9 @@
   caret-color: var(--dsw-alias-brand-text);
 
   &[data-empty='true']::before {
+    position: absolute;
+    top: var(--input-padding-top);
+    left: 16px;
     content: attr(data-placeholder);
     color: var(--dsw-alias-label-caption);
     pointer-events: none;
@@ -258,6 +262,62 @@
 
 .quoteLabel {
   color: var(--dsw-alias-brand-text);
+}
+
+.skillToken {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 10px 1px 8px;
+  margin: 0 2px;
+  border-radius: 999px;
+  background-color: var(--dsw-alias-interactive-bg-hover);
+  border: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+  vertical-align: baseline;
+  user-select: none;
+  cursor: default;
+
+  &:hover .skillGlyph {
+    display: none;
+  }
+
+  &:hover .removeGlyph {
+    display: inline-flex;
+  }
+}
+
+.skillIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--dsw-alias-label-primary);
+  }
+
+  svg {
+    display: block;
+    width: 15px;
+    height: 15px;
+  }
+}
+
+.skillGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.skillLabel {
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 
 /* 录音中由频谱接管第一行，隐藏正文但保留高度 */

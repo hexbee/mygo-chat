@@ -88,39 +88,52 @@ export const buildSkillCatalogReminder = (catalog: SkillCatalog): string => {
   ].join('\n')
 }
 
-/** 解析用户输入开头的 `/skill-name` 显式调用 */
-export const parseSlashSkillInvocation = (text: string): string | null => {
-  const match = text.trimStart().match(/^\/([A-Za-z0-9._-]+)(?:\s|$)/)
-  return match ? match[1] : null
+/** 解析用户输入中所有的 `/skill-name` 显式调用（支持单条消息内同时引用多个技能） */
+export const parseSlashSkillInvocations = (text: string): string[] => {
+  const names: string[] = []
+  const seen = new Set<string>()
+  const regex = /(?:^|\s)\/([A-Za-z0-9._-]+)/g
+  for (const match of text.matchAll(regex)) {
+    const name = match[1]
+    const key = name.toLowerCase()
+    if (!seen.has(key)) {
+      seen.add(key)
+      names.push(name)
+    }
+  }
+  return names
 }
 
-/** 如果用户输入以 `/skill-name` 开头且匹配本地 Skill，预加载全文并返回注入的 <system-reminder> */
+/** 如果用户输入包含 `/skill-name` 且匹配本地启用 Skill，预加载全文并返回注入的 <system-reminder> */
 export const resolveExplicitSkillReminder = async (
   userText: string,
   workdir: string
 ): Promise<string> => {
-  const skillName = parseSlashSkillInvocation(userText)
-  if (!skillName) {
+  const skillNames = parseSlashSkillInvocations(userText)
+  if (skillNames.length === 0) {
     return ''
   }
-  try {
-    const doc: SkillDocument = await SkillService.readSkill(
-      skillName,
-      workdir,
-      currentSkillConfig()
+  const cfg = currentSkillConfig()
+  const docs = await Promise.all(
+    skillNames.map((name) =>
+      SkillService.readSkill(name, workdir, cfg).catch(() => null as SkillDocument | null)
     )
+  )
+  const blocks: string[] = []
+  for (const doc of docs) {
     if (!doc?.content) {
-      return ''
+      continue
     }
-    return [
-      `<system-reminder type="skill-invoked" name="${doc.name}" scope="${doc.scope}">`,
-      `The user explicitly invoked skill "/${doc.name}". Follow these skill instructions carefully.`,
-      `Base directory: ${doc.baseDir}`,
-      '',
-      doc.content,
-      '</system-reminder>',
-    ].join('\n')
-  } catch {
-    return ''
+    blocks.push(
+      [
+        `<system-reminder type="skill-invoked" name="${doc.name}" scope="${doc.scope}">`,
+        `The user explicitly invoked skill "/${doc.name}". Follow these skill instructions carefully.`,
+        `Base directory: ${doc.baseDir}`,
+        '',
+        doc.content,
+        '</system-reminder>',
+      ].join('\n')
+    )
   }
+  return blocks.join('\n\n')
 }
