@@ -36,6 +36,29 @@ type MCPService struct {
 	started       bool
 	emitFn        func(MCPSnapshot)
 	httpTransport http.RoundTripper
+	keepAlive     time.Duration // test override: 0 uses per-server/transport default; <0 disables
+}
+
+// resolveKeepAliveForServer determines the keepalive interval for a supervised
+// connection: per-server KeepAliveMs takes precedence, followed by service-level
+// test override, then transport default (30s for streamable-http, 0 for stdio).
+func resolveKeepAliveForServer(cfg MCPServerConfig, serviceOverride time.Duration) time.Duration {
+	if cfg.KeepAliveMs < 0 {
+		return 0
+	}
+	if cfg.KeepAliveMs > 0 {
+		return time.Duration(cfg.KeepAliveMs) * time.Millisecond
+	}
+	if serviceOverride < 0 {
+		return 0
+	}
+	if serviceOverride > 0 {
+		return serviceOverride
+	}
+	if cfg.Transport == MCPTransportStdio {
+		return 0
+	}
+	return mcpDefaultKeepAlive
 }
 
 type mcpIndexedTool struct {
@@ -329,6 +352,7 @@ func (s *MCPService) ExportConfigJSON() (string, error) {
 		ToolLoading       string              `json:"toolLoading,omitempty"`
 		TrustServer       bool                `json:"trustServer,omitempty"`
 		ToolCallTimeoutMs int                 `json:"toolCallTimeoutMs,omitempty"`
+		KeepAliveMs       int                 `json:"keepAliveMs,omitempty"`
 		Reconnect         *MCPReconnectConfig `json:"reconnect,omitempty"`
 	}
 	outMap := make(map[string]exportEntry, len(servers))
@@ -345,6 +369,7 @@ func (s *MCPService) ExportConfigJSON() (string, error) {
 			ToolLoading:       cfg.ToolLoading,
 			TrustServer:       cfg.TrustServer,
 			ToolCallTimeoutMs: cfg.ToolCallTimeoutMs,
+			KeepAliveMs:       cfg.KeepAliveMs,
 			Reconnect:         cfg.Reconnect,
 		}
 	}
@@ -485,12 +510,13 @@ func (s *MCPService) startServerRunner(cfg MCPServerConfig) {
 	}
 	s.mu.Lock()
 	s.runners[cfg.Name] = runner
+	keepAlive := resolveKeepAliveForServer(cfg, s.keepAlive)
 	s.mu.Unlock()
 
-	go s.superviseServer(ctx, cfg, runner)
+	go s.superviseServer(ctx, cfg, runner, keepAlive)
 }
 
-func (s *MCPService) superviseServer(ctx context.Context, cfg MCPServerConfig, runner *mcpServerRunner) {
+func (s *MCPService) superviseServer(ctx context.Context, cfg MCPServerConfig, runner *mcpServerRunner, keepAlive time.Duration) {
 	defer close(runner.done)
 
 	policy := cfg.Reconnect
@@ -565,9 +591,9 @@ func (s *MCPService) superviseServer(ctx context.Context, cfg MCPServerConfig, r
 		}
 
 		if cfg.Transport == MCPTransportStdio {
-			wire, err = startMCPStdioClient(cfg, resolvedExec, resolvedPATH, onToolsChanged)
+			wire, err = startMCPStdioClientWithKeepAlive(cfg, resolvedExec, resolvedPATH, onToolsChanged, keepAlive)
 		} else {
-			wire = newMCPHTTPClient(cfg, onToolsChanged, s.httpTransport)
+			wire = newMCPHTTPClientWithKeepAlive(cfg, onToolsChanged, s.httpTransport, keepAlive)
 		}
 
 		var connectedAt time.Time
@@ -618,7 +644,11 @@ func (s *MCPService) superviseServer(ctx context.Context, cfg MCPServerConfig, r
 							_ = wire.Close()
 							return
 						case <-wire.Done():
-							err = fmt.Errorf("connection closed")
+							if werr := wire.WaitError(); werr != nil && !isGenericMCPCloseError(werr) {
+								err = fmt.Errorf("connection closed: %w", werr)
+							} else {
+								err = fmt.Errorf("connection closed")
+							}
 						}
 					}
 				}
@@ -774,15 +804,13 @@ func mapWireTools(serverName string, rawTools []mcpWireTool) ([]MCPToolInfo, err
 		if schema == nil {
 			schema = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		readOnly := rt.Annotations != nil && rt.Annotations.ReadOnlyHint != nil && *rt.Annotations.ReadOnlyHint
-
 		tools = append(tools, MCPToolInfo{
 			PublicName:   pub,
 			RawName:      rt.Name,
 			ServerName:   serverName,
 			Description:  rt.Description,
 			InputSchema:  schema,
-			ReadOnlyHint: readOnly,
+			ReadOnlyHint: rt.ReadOnlyHint,
 		})
 	}
 	sort.Slice(tools, func(i, j int) bool {
@@ -897,9 +925,9 @@ func (s *MCPService) executeMCPTool(ctx context.Context, req ToolExecuteRequest)
 			}, nil
 		}
 		// If a Streamable HTTP server restarted and invalidated Mcp-Session-Id (runtime HTTP 404),
-		// close the stale generation so the supervisor reconnects immediately.
+		// record the expiry cause and close the stale generation so the supervisor rebuilds the generation with the expiry cause attached.
 		if isSessionExpiredMCPError(err) {
-			_ = wire.Close()
+			_ = wire.CloseWithCause(err)
 		}
 		redactedErr := redactMCPSecrets(err.Error(), cfg)
 		return ToolExecuteResult{

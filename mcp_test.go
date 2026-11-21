@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -104,11 +105,12 @@ func TestMCPConfigPersistence0600(t *testing.T) {
 
 	input := map[string]MCPServerConfig{
 		"remote": {
-			Name:      "remote",
-			Transport: MCPTransportHTTP,
-			Enabled:   true,
-			URL:       "https://mcp.example.com/mcp",
-			Headers:   map[string]string{"Authorization": "Bearer tok-12345"},
+			Name:        "remote",
+			Transport:   MCPTransportHTTP,
+			Enabled:     true,
+			KeepAliveMs: -1,
+			URL:         "https://mcp.example.com/mcp",
+			Headers:     map[string]string{"Authorization": "Bearer tok-12345"},
 		},
 	}
 	if err := saveMCPConfigsToFile(cfgPath, input); err != nil {
@@ -138,6 +140,9 @@ func TestMCPConfigPersistence0600(t *testing.T) {
 	}
 	if got.ToolCallTimeoutMs != mcpDefaultToolCallTimeoutMs {
 		t.Fatalf("expected default timeout %d, got %d", mcpDefaultToolCallTimeoutMs, got.ToolCallTimeoutMs)
+	}
+	if got.KeepAliveMs != -1 {
+		t.Fatalf("expected keepAliveMs=-1 to persist across disk round-trip, got %d", got.KeepAliveMs)
 	}
 	if got.Headers["Authorization"] != "Bearer tok-12345" {
 		t.Fatalf("header mismatch: %v", got.Headers)
@@ -596,13 +601,13 @@ func TestMCPListToolsPaginationCaps(t *testing.T) {
 	for _, tool := range tools {
 		switch tool.Name {
 		case "search_docs":
-			if tool.Annotations == nil || tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
-				t.Fatalf("search_docs must project readOnlyHint=true: %+v", tool.Annotations)
+			if !tool.ReadOnlyHint {
+				t.Fatalf("search_docs must project readOnlyHint=true: %+v", tool)
 			}
 		case "create_issue":
 			// Undeclared annotations must not be reported as read-only.
-			if tool.Annotations != nil && tool.Annotations.ReadOnlyHint != nil && *tool.Annotations.ReadOnlyHint {
-				t.Fatalf("create_issue must project readOnlyHint=false: %+v", tool.Annotations)
+			if tool.ReadOnlyHint {
+				t.Fatalf("create_issue must project readOnlyHint=false: %+v", tool)
 			}
 			if tool.InputSchema["type"] != "object" {
 				t.Fatalf("expected projected input schema object, got %+v", tool.InputSchema)
@@ -1263,8 +1268,8 @@ func TestMCPWireToolProjectionReadOnly(t *testing.T) {
 		InputSchema: map[string]any{"type": "object"},
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	})
-	if ro.Annotations == nil || ro.Annotations.ReadOnlyHint == nil || !*ro.Annotations.ReadOnlyHint {
-		t.Fatalf("expected readOnlyHint=true projection, got %+v", ro.Annotations)
+	if !ro.ReadOnlyHint {
+		t.Fatalf("expected readOnlyHint=true projection, got %+v", ro)
 	}
 
 	undeclared := wireToolFromSDK(&mcp.Tool{
@@ -1478,5 +1483,405 @@ func TestMCPErrorClassificationHelpers(t *testing.T) {
 	wrapped := fmt.Errorf("wrapped: %w", expired)
 	if !isSessionExpiredMCPError(wrapped) {
 		t.Fatalf("session expiry must survive error wrapping")
+	}
+	if !isGenericMCPCloseError(mcp.ErrConnectionClosed) {
+		t.Fatalf("bare ErrConnectionClosed should be classified as generic close")
+	}
+	if isGenericMCPCloseError(nil) {
+		t.Fatalf("nil error must not be classified as generic close")
+	}
+	withStderr := fmt.Errorf("%w (stderr: fatal bootstrap error)", mcp.ErrConnectionClosed)
+	if isGenericMCPCloseError(withStderr) {
+		t.Fatalf("ErrConnectionClosed with attached stderr context must not be discarded as generic close")
+	}
+}
+
+// TestMCPStdio_SupervisorPreservesWaitError verifies P1: when a connected stdio
+// subprocess crashes, the supervisor preserves the real WaitError cause instead
+// of overwriting LastError with a bare "connection closed".
+func TestMCPStdio_SupervisorPreservesWaitError(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable failed: %v", err)
+	}
+
+	svc := newMCPService(filepath.Join(t.TempDir(), "mcp.json"))
+	svc.emitFn = func(MCPSnapshot) {}
+	defer svc.StopAll()
+
+	cfg := MCPServerConfig{
+		Name:      "crash-cause",
+		Transport: MCPTransportStdio,
+		Enabled:   true,
+		Command:   exe,
+		Args:      []string{"-test.run=^TestMCPStdioHelperProcess$"},
+		Env: map[string]string{
+			"GO_WANT_MCP_STDIO_HELPER": "1",
+			"MCP_HELPER_ALLOW_DIE":     "1",
+		},
+		Reconnect: &MCPReconnectConfig{Enabled: false},
+	}
+	if _, err := svc.UpsertServer(cfg); err != nil {
+		t.Fatalf("UpsertServer failed: %v", err)
+	}
+	waitForMCPState(t, svc, "crash-cause", MCPStateConnected, 5*time.Second)
+
+	// Trigger abrupt exit inside the subprocess.
+	_, _ = svc.executeMCPTool(context.Background(), ToolExecuteRequest{
+		ToolName: mcpPublicToolName("crash-cause", "die"),
+	})
+
+	st := waitForMCPState(t, svc, "crash-cause", MCPStateError, 5*time.Second)
+	if st.LastError == "" || st.LastError == "connection closed" {
+		t.Fatalf("expected underlying WaitError cause in LastError, got %q", st.LastError)
+	}
+}
+
+// TestMCPStreamableHTTP_KeepAliveDetectsSilentDeadSession verifies P2: an idle
+// session whose server stops answering ping is closed by KeepAlive and enters
+// reconnecting state.
+func TestMCPStreamableHTTP_KeepAliveDetectsSilentDeadSession(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var req struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		switch req.Method {
+		case "initialize":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Mcp-Session-Id", "sess-ka")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"protocolVersion": mcpProtocolVersion,
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+					"serverInfo":      map[string]any{"name": "mock-ka", "version": "0.0.1"},
+				},
+			})
+		case "tools/list":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result":  map[string]any{"tools": []any{}},
+			})
+		case "ping":
+			// Simulate an unresponsive/dead upstream on keepalive ping.
+			w.WriteHeader(http.StatusBadGateway)
+		default:
+			w.WriteHeader(http.StatusAccepted)
+		}
+	})
+
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	svc := newMCPService(filepath.Join(t.TempDir(), "mcp.json"))
+	svc.emitFn = func(MCPSnapshot) {}
+	svc.keepAlive = 60 * time.Millisecond
+	defer svc.StopAll()
+
+	cfg := MCPServerConfig{
+		Name:      "ka-test",
+		Transport: MCPTransportHTTP,
+		Enabled:   true,
+		URL:       httpServer.URL,
+		Reconnect: &MCPReconnectConfig{
+			Enabled:        true,
+			InitialDelayMs: 500,
+			MaxDelayMs:     2000,
+			MaxAttempts:    3,
+		},
+	}
+	if _, err := svc.UpsertServer(cfg); err != nil {
+		t.Fatalf("UpsertServer failed: %v", err)
+	}
+	waitForMCPState(t, svc, "ka-test", MCPStateConnected, 5*time.Second)
+
+	st := waitForMCPState(t, svc, "ka-test", MCPStateReconnecting, 5*time.Second)
+	if st.NextRetryAtMs <= 0 {
+		t.Fatalf("expected NextRetryAtMs to be scheduled after keepalive failure, got %+v", st)
+	}
+}
+
+// TestMCPSDKLoggerRedactsAndFiltersLevel verifies P3: SDK logger drops info/debug
+// noise, emits warn/error messages, and redacts configured secrets.
+func TestMCPSDKLoggerRedactsAndFiltersLevel(t *testing.T) {
+	const secret = "sdk-log-secret-98765"
+	cfg := MCPServerConfig{
+		Name:      "log-test",
+		Transport: MCPTransportHTTP,
+		URL:       "https://example.com/mcp",
+		Headers:   map[string]string{"Authorization": "Bearer " + secret},
+	}
+
+	var lines []string
+	logger := newMCPSDKLogger(cfg, func(line string) {
+		lines = append(lines, line)
+	})
+
+	logger.Info("noisy info message")
+	logger.Warn("got 500 instead of 405 for standalone SSE stream", "token", secret)
+
+	if len(lines) != 1 {
+		t.Fatalf("expected only warn log line, got %d: %+v", len(lines), lines)
+	}
+	if strings.Contains(lines[0], secret) || !strings.Contains(lines[0], mcpRedactedPlaceholder) {
+		t.Fatalf("expected secret to be redacted in SDK warn log, got %q", lines[0])
+	}
+
+	// Verify the production out == nil fallback writes redacted warnings to the default logger.
+	var buf bytes.Buffer
+	origOut := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(origOut) })
+
+	defaultLogger := newMCPSDKLogger(cfg, nil)
+	defaultLogger.Info("suppressed info")
+	defaultLogger.Warn("standalone sse warning", "token", secret)
+
+	logged := buf.String()
+	if strings.Contains(logged, "suppressed info") {
+		t.Fatalf("default SDK logger should filter info messages: %q", logged)
+	}
+	if !strings.Contains(logged, "mcp(log-test): sdk:") || !strings.Contains(logged, mcpRedactedPlaceholder) || strings.Contains(logged, secret) {
+		t.Fatalf("unexpected default SDK logger output: %q", logged)
+	}
+}
+
+// TestMCPResolveKeepAliveForServer verifies N1 & N3: default keepalive is enabled
+// only for streamable-http (0 for stdio), negative values disable it, and explicit
+// KeepAliveMs overrides both transport default and service override.
+func TestMCPResolveKeepAliveForServer(t *testing.T) {
+	cases := []struct {
+		name            string
+		cfg             MCPServerConfig
+		serviceOverride time.Duration
+		want            time.Duration
+	}{
+		{name: "http default", cfg: MCPServerConfig{Transport: MCPTransportHTTP}, want: mcpDefaultKeepAlive},
+		{name: "stdio default disabled", cfg: MCPServerConfig{Transport: MCPTransportStdio}, want: 0},
+		{name: "http disabled via config", cfg: MCPServerConfig{Transport: MCPTransportHTTP, KeepAliveMs: -1}, want: 0},
+		{name: "http disabled via service override", cfg: MCPServerConfig{Transport: MCPTransportHTTP}, serviceOverride: -1, want: 0},
+		{name: "http custom config", cfg: MCPServerConfig{Transport: MCPTransportHTTP, KeepAliveMs: 45_000}, want: 45 * time.Second},
+		{name: "stdio explicit opt-in", cfg: MCPServerConfig{Transport: MCPTransportStdio, KeepAliveMs: 15_000}, want: 15 * time.Second},
+		{name: "config disables even with service override", cfg: MCPServerConfig{Transport: MCPTransportHTTP, KeepAliveMs: -1}, serviceOverride: 5 * time.Second, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveKeepAliveForServer(tc.cfg, tc.serviceOverride); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMCPNormalizeKeepAliveClamp verifies N10: normalizeMCPServerConfig clamps
+// positive out-of-range KeepAliveMs values into [mcpMinKeepAliveMs, mcpMaxKeepAliveMs],
+// normalizes negative values to -1 (disabled), and preserves 0 (default).
+func TestMCPNormalizeKeepAliveClamp(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{name: "negative normalized to -1", in: -500, want: -1},
+		{name: "disabled preserved", in: -1, want: -1},
+		{name: "default preserved", in: 0, want: 0},
+		{name: "below min clamped", in: 500, want: mcpMinKeepAliveMs},
+		{name: "in range preserved", in: 15_000, want: 15_000},
+		{name: "above max clamped", in: 999_999, want: mcpMaxKeepAliveMs},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeMCPServerConfig(MCPServerConfig{
+				Name:        "clamp",
+				Transport:   MCPTransportHTTP,
+				URL:         "https://clamp.local/mcp",
+				KeepAliveMs: tc.in,
+			})
+			if got.KeepAliveMs != tc.want {
+				t.Fatalf("KeepAliveMs=%d normalized to %d, want %d", tc.in, got.KeepAliveMs, tc.want)
+			}
+		})
+	}
+}
+
+// TestMCPStreamableHTTP_ExecuteToolSessionExpiryPropagatesCause verifies N9:
+// when executeMCPTool hits a runtime HTTP 404 session expiry, wire.CloseWithCause(err)
+// preserves the "session expired" cause into the supervisor's LastError when
+// transitioning to MCPStateReconnecting.
+func TestMCPStreamableHTTP_ExecuteToolSessionExpiryPropagatesCause(t *testing.T) {
+	var expired atomic.Bool
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		var req struct {
+			ID     any            `json:"id"`
+			Method string         `json:"method"`
+			Params map[string]any `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		if r.Header.Get("Mcp-Session-Id") != "" && expired.Load() {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("session gone"))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "sess-n9")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"protocolVersion": mcpProtocolVersion,
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+					"serverInfo":      map[string]any{"name": "mock-n9", "version": "0.0.1"},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"tools": []map[string]any{{
+						"name":        "echo",
+						"description": "Echo",
+						"inputSchema": map[string]any{"type": "object"},
+					}},
+				},
+			})
+		case "tools/call":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "ok"}},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusAccepted)
+		}
+	})
+
+	svc := newMCPService(filepath.Join(t.TempDir(), "mcp.json"))
+	svc.emitFn = func(MCPSnapshot) {}
+	svc.httpTransport = roundTripHandler{handler: handler}
+	svc.keepAlive = -1
+	defer svc.StopAll()
+
+	cfg := MCPServerConfig{
+		Name:      "exp-cause",
+		Transport: MCPTransportHTTP,
+		Enabled:   true,
+		URL:       "https://exp-cause.local/mcp",
+		Reconnect: &MCPReconnectConfig{
+			Enabled:        true,
+			InitialDelayMs: 400,
+			MaxDelayMs:     2000,
+			MaxAttempts:    3,
+		},
+	}
+	if _, err := svc.UpsertServer(cfg); err != nil {
+		t.Fatalf("UpsertServer failed: %v", err)
+	}
+	waitForMCPState(t, svc, "exp-cause", MCPStateConnected, 5*time.Second)
+
+	expired.Store(true)
+	res, err := svc.executeMCPTool(context.Background(), ToolExecuteRequest{
+		ToolName: mcpPublicToolName("exp-cause", "echo"),
+	})
+	if err != nil {
+		t.Fatalf("executeMCPTool returned unexpected Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected IsError=true after runtime 404 session expiry, got %+v", res)
+	}
+
+	st := waitForMCPState(t, svc, "exp-cause", MCPStateReconnecting, 5*time.Second)
+	if !strings.Contains(strings.ToLower(st.LastError), "session expired") {
+		t.Fatalf("expected supervisor LastError to preserve session expired cause, got %q", st.LastError)
+	}
+}
+
+// TestMCPKeepAliveExportImportRoundTrip verifies O2: ExportConfigJSON and
+// parseMCPServersImportJSON preserve KeepAliveMs across -1 (disabled), 0
+// (omitted via omitempty / transport default), and custom positive intervals.
+func TestMCPKeepAliveExportImportRoundTrip(t *testing.T) {
+	cases := []struct {
+		name           string
+		keepAliveMs    int
+		wantOmitInJSON bool
+	}{
+		{name: "disabled", keepAliveMs: -1},
+		{name: "default omitted", keepAliveMs: 0, wantOmitInJSON: true},
+		{name: "custom interval", keepAliveMs: 15_000},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newMCPService(filepath.Join(t.TempDir(), "mcp.json"))
+			svc.emitFn = func(MCPSnapshot) {}
+			defer svc.StopAll()
+
+			cfg := MCPServerConfig{
+				Name:        "rt-server",
+				Transport:   MCPTransportHTTP,
+				Enabled:     false,
+				URL:         "https://rt.example.com/mcp",
+				KeepAliveMs: tc.keepAliveMs,
+			}
+			if _, err := svc.UpsertServer(cfg); err != nil {
+				t.Fatalf("UpsertServer failed: %v", err)
+			}
+
+			exported, err := svc.ExportConfigJSON()
+			if err != nil {
+				t.Fatalf("ExportConfigJSON failed: %v", err)
+			}
+			hasField := strings.Contains(exported, `"keepAliveMs"`)
+			if tc.wantOmitInJSON && hasField {
+				t.Fatalf("expected keepAliveMs=0 to be omitted from exported JSON, got:\n%s", exported)
+			}
+			if !tc.wantOmitInJSON && !hasField {
+				t.Fatalf("expected keepAliveMs=%d in exported JSON, got:\n%s", tc.keepAliveMs, exported)
+			}
+
+			parsed, verrs := parseMCPServersImportJSON(exported)
+			if len(verrs) != 0 || len(parsed) != 1 {
+				t.Fatalf("unexpected import result: parsed=%+v verrs=%+v", parsed, verrs)
+			}
+			if parsed[0].KeepAliveMs != tc.keepAliveMs {
+				t.Fatalf("round-trip KeepAliveMs=%d, want %d", parsed[0].KeepAliveMs, tc.keepAliveMs)
+			}
+		})
 	}
 }

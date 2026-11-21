@@ -31,6 +31,8 @@ const (
 	mcpDefaultToolCallTimeoutMs = 60_000
 	mcpMinToolCallTimeoutMs     = 1_000
 	mcpMaxToolCallTimeoutMs     = 300_000
+	mcpMinKeepAliveMs           = 1_000
+	mcpMaxKeepAliveMs           = 300_000
 	mcpDefaultReconnectInitMs   = 500
 	mcpDefaultReconnectMaxMs    = 30_000
 	mcpDefaultReconnectAttempts = 10
@@ -62,6 +64,7 @@ type MCPServerConfig struct {
 	ToolLoading       string              `json:"toolLoading,omitempty"` // "on-demand" (default) | "eager"
 	TrustServer       bool                `json:"trustServer,omitempty"`
 	ToolCallTimeoutMs int                 `json:"toolCallTimeoutMs,omitempty"`
+	KeepAliveMs       int                 `json:"keepAliveMs,omitempty"` // 0=transport default (30s HTTP, off stdio); <0=disabled
 	Reconnect         *MCPReconnectConfig `json:"reconnect,omitempty"`
 
 	// Streamable HTTP fields
@@ -196,6 +199,15 @@ func normalizeMCPServerConfig(cfg MCPServerConfig) MCPServerConfig {
 	} else if out.ToolCallTimeoutMs > mcpMaxToolCallTimeoutMs {
 		out.ToolCallTimeoutMs = mcpMaxToolCallTimeoutMs
 	}
+	if out.KeepAliveMs < 0 {
+		out.KeepAliveMs = -1
+	} else if out.KeepAliveMs > 0 {
+		if out.KeepAliveMs < mcpMinKeepAliveMs {
+			out.KeepAliveMs = mcpMinKeepAliveMs
+		} else if out.KeepAliveMs > mcpMaxKeepAliveMs {
+			out.KeepAliveMs = mcpMaxKeepAliveMs
+		}
+	}
 	if out.Reconnect == nil {
 		out.Reconnect = &MCPReconnectConfig{
 			Enabled:        true,
@@ -282,6 +294,14 @@ func validateMCPServerConfig(cfg MCPServerConfig) []MCPValidationError {
 		errs = append(errs, MCPValidationError{
 			Field:   "toolCallTimeoutMs",
 			Message: fmt.Sprintf("toolCallTimeoutMs must be between %d and %d", mcpMinToolCallTimeoutMs, mcpMaxToolCallTimeoutMs),
+		})
+	}
+	// normalizeMCPServerConfig already clamps positive values into range; this
+	// check only guards callers that bypass normalization.
+	if cfg.KeepAliveMs > 0 && (cfg.KeepAliveMs < mcpMinKeepAliveMs || cfg.KeepAliveMs > mcpMaxKeepAliveMs) {
+		errs = append(errs, MCPValidationError{
+			Field:   "keepAliveMs",
+			Message: fmt.Sprintf("keepAliveMs must be <0 (disabled), 0 (default), or between %d and %d", mcpMinKeepAliveMs, mcpMaxKeepAliveMs),
 		})
 	}
 
@@ -472,6 +492,7 @@ func parseMCPServersImportJSON(rawJSON string) ([]MCPServerConfig, []MCPValidati
 		ToolLoading       string              `json:"toolLoading"`
 		TrustServer       bool                `json:"trustServer"`
 		ToolCallTimeoutMs int                 `json:"toolCallTimeoutMs"`
+		KeepAliveMs       int                 `json:"keepAliveMs"`
 		Reconnect         *MCPReconnectConfig `json:"reconnect"`
 	}
 
@@ -522,6 +543,7 @@ func parseMCPServersImportJSON(rawJSON string) ([]MCPServerConfig, []MCPValidati
 			ToolLoading:       entry.ToolLoading,
 			TrustServer:       entry.TrustServer,
 			ToolCallTimeoutMs: entry.ToolCallTimeoutMs,
+			KeepAliveMs:       entry.KeepAliveMs,
 			Reconnect:         entry.Reconnect,
 			URL:               endpointURL,
 			Headers:           entry.Headers,

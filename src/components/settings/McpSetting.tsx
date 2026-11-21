@@ -531,6 +531,11 @@ const ServerFormModal = ({
     initial?.toolLoading === 'eager' ? 'eager' : 'on-demand'
   )
   const [timeoutMs, setTimeoutMs] = useState(String(initial?.toolCallTimeoutMs ?? 60000))
+  const [keepAliveMs, setKeepAliveMs] = useState(
+    initial?.keepAliveMs !== undefined && initial.keepAliveMs !== 0
+      ? String(initial.keepAliveMs)
+      : ''
+  )
   const [reconnectEnabled, setReconnectEnabled] = useState(initial?.reconnect?.enabled ?? true)
   const [trustServer, setTrustServer] = useState(initial?.trustServer ?? false)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -572,25 +577,32 @@ const ServerFormModal = ({
 
   const buildConfig = (): MCPServerConfig => {
     const parsedTimeout = Number.parseInt(timeoutMs, 10)
+    const trimmedKeepAlive = keepAliveMs.trim()
+    const parsedKeepAlive = trimmedKeepAlive === '' ? 0 : Number.parseInt(trimmedKeepAlive, 10)
     return {
+      ...(initial ?? {}),
       name: name.trim(),
       transport,
       enabled,
       toolLoading,
       trustServer,
       toolCallTimeoutMs: Number.isFinite(parsedTimeout) ? parsedTimeout : 60000,
-      reconnect: {
-        enabled: reconnectEnabled,
-        initialDelayMs: initial?.reconnect?.initialDelayMs ?? 500,
-        maxDelayMs: initial?.reconnect?.maxDelayMs ?? 30000,
-        maxAttempts: initial?.reconnect?.maxAttempts ?? 10,
-      },
+      keepAliveMs: Number.isFinite(parsedKeepAlive)
+        ? parsedKeepAlive
+        : (initial?.keepAliveMs ?? 0),
+      reconnect: { ...(initial?.reconnect ?? {}), enabled: reconnectEnabled },
       ...(transport === 'streamable-http'
         ? {
             url: url.trim(),
             headers: kvToRecord(headers),
+            command: undefined,
+            args: undefined,
+            cwd: undefined,
+            env: undefined,
           }
         : {
+            url: undefined,
+            headers: undefined,
             command: command.trim(),
             args: parseArgsLine(argsLine),
             cwd: cwd.trim() || undefined,
@@ -852,6 +864,18 @@ const ServerFormModal = ({
                 max={300000}
                 onChange={(e) => setTimeoutMs(e.target.value)}
               />
+            </div>
+
+            <div className={styles.field}>
+              <label className={styles.fieldLabel}>{t('settingsMcpKeepAliveMs')}</label>
+              <input
+                type="number"
+                className={styles.input}
+                value={keepAliveMs}
+                placeholder={t('settingsMcpKeepAlivePlaceholder')}
+                onChange={(e) => setKeepAliveMs(e.target.value)}
+              />
+              <div className={styles.fieldHint}>{t('settingsMcpKeepAliveHint')}</div>
             </div>
 
             <div className={styles.toggleRow}>

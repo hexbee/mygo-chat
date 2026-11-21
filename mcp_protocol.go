@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -49,6 +50,13 @@ const (
 	// mcpStdioWaitDelay bounds exec.Cmd.Wait when a wrapper or grandchild keeps the
 	// stderr pipe open, so a single misbehaving server cannot pin the supervisor.
 	mcpStdioWaitDelay = 2 * time.Second
+	// mcpDefaultKeepAlive probes idle supervised sessions so silently dropped HTTP
+	// or proxy connections are detected before the next tool call. Only valid for
+	// protocol versions < 2026-07-28 (which matches mcpProtocolVersion).
+	mcpDefaultKeepAlive = 30 * time.Second
+	// mcpDefaultKeepAliveFailureThreshold tolerates one transient ping blip before
+	// closing the session.
+	mcpDefaultKeepAliveFailureThreshold = 2
 )
 
 // mcpWireClient abstracts a single connected MCP client generation (streamable-http or stdio).
@@ -62,7 +70,9 @@ type mcpWireClient interface {
 	ListTools(ctx context.Context, maxPages, maxTools int) ([]mcpWireTool, bool, error)
 	CallTool(ctx context.Context, rawName string, arguments map[string]any) (mcpCallToolResult, error)
 	Done() <-chan struct{}
+	WaitError() error
 	Close() error
+	CloseWithCause(cause error) error
 }
 
 // mcpFatalConfigError marks non-retryable configuration or auth errors (invalid URL, 401/403, initial 404).
@@ -97,6 +107,14 @@ func isSessionExpiredMCPError(err error) bool {
 	return errors.As(err, &expired)
 }
 
+// isGenericMCPCloseError reports whether err is a bare mcp.ErrConnectionClosed
+// without additional diagnostic context (such as an attached stdio stderr tail).
+func isGenericMCPCloseError(err error) bool {
+	return err != nil &&
+		errors.Is(err, mcp.ErrConnectionClosed) &&
+		strings.TrimSpace(err.Error()) == mcp.ErrConnectionClosed.Error()
+}
+
 // mcpInitializeResult is the SDK initialize result projected onto the only fields
 // MCPService consumes: server identity and instructions. Tools capability is kept
 // internally because it gates tools/list.
@@ -105,18 +123,11 @@ type mcpInitializeResult struct {
 	Instructions string
 }
 
-type mcpWireToolAnnotations struct {
-	ReadOnlyHint    *bool
-	DestructiveHint *bool
-	IdempotentHint  *bool
-	OpenWorldHint   *bool
-}
-
 type mcpWireTool struct {
-	Name        string
-	Description string
-	InputSchema map[string]any
-	Annotations *mcpWireToolAnnotations
+	Name         string
+	Description  string
+	InputSchema  map[string]any
+	ReadOnlyHint bool
 }
 
 // mcpContentBlock is the transport-independent projection of one MCP content
@@ -376,37 +387,75 @@ type mcpSDKClient struct {
 	session *mcp.ClientSession
 	closed  bool
 
+	waitMu  sync.Mutex
+	waitErr error
+
 	hasTools atomic.Bool
 
 	doneOnce sync.Once
 	doneCh   chan struct{}
 }
 
-func newMCPClientBase(cfg MCPServerConfig, onToolsChanged func()) *mcpSDKClient {
+type mcpRedactedLogWriter struct {
+	cfg MCPServerConfig
+	out func(string)
+}
+
+func (w mcpRedactedLogWriter) Write(p []byte) (int, error) {
+	msg := strings.TrimSpace(redactMCPSecrets(string(p), w.cfg))
+	if msg != "" {
+		if w.out != nil {
+			w.out(msg)
+		} else {
+			log.Printf("mcp(%s): sdk: %s", w.cfg.Name, msg)
+		}
+	}
+	return len(p), nil
+}
+
+// newMCPSDKLogger forwards SDK warnings and errors (e.g. non-405 standalone SSE
+// responses or malformed frames) to Vela's log with secrets redacted.
+func newMCPSDKLogger(cfg MCPServerConfig, out func(string)) *slog.Logger {
+	return slog.New(slog.NewTextHandler(mcpRedactedLogWriter{cfg: cfg, out: out}, &slog.HandlerOptions{
+		Level: slog.LevelWarn,
+	}))
+}
+
+func newMCPClientBase(cfg MCPServerConfig, onToolsChanged func(), keepAlive time.Duration) *mcpSDKClient {
 	c := &mcpSDKClient{
 		cfg:            cfg,
 		onToolsChanged: onToolsChanged,
 		doneCh:         make(chan struct{}),
 	}
+	opts := &mcp.ClientOptions{
+		// Vela exposes no filesystem roots or sampling back to servers; an empty
+		// capability set matches the pre-SDK client handshake.
+		Capabilities: &mcp.ClientCapabilities{},
+		Logger:       newMCPSDKLogger(cfg, nil),
+		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
+			if c.onToolsChanged != nil {
+				// Never block the SDK read loop while the service re-lists tools.
+				go c.onToolsChanged()
+			}
+		},
+	}
+	if keepAlive > 0 {
+		opts.KeepAlive = keepAlive
+		opts.KeepAliveFailureThreshold = mcpDefaultKeepAliveFailureThreshold
+	}
 	c.client = mcp.NewClient(
 		&mcp.Implementation{Name: mcpClientName, Version: CurrentAppVersion},
-		&mcp.ClientOptions{
-			// Vela exposes no filesystem roots or sampling back to servers; an empty
-			// capability set matches the pre-SDK client handshake.
-			Capabilities: &mcp.ClientCapabilities{},
-			ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
-				if c.onToolsChanged != nil {
-					// Never block the SDK read loop while the service re-lists tools.
-					go c.onToolsChanged()
-				}
-			},
-		},
+		opts,
 	)
 	return c
 }
 
 func newMCPHTTPClient(cfg MCPServerConfig, onToolsChanged func(), transport http.RoundTripper) *mcpSDKClient {
-	c := newMCPClientBase(cfg, onToolsChanged)
+	return newMCPHTTPClientWithKeepAlive(cfg, onToolsChanged, transport, 0)
+}
+
+func newMCPHTTPClientWithKeepAlive(cfg MCPServerConfig, onToolsChanged func(), transport http.RoundTripper, keepAlive time.Duration) *mcpSDKClient {
+	c := newMCPClientBase(cfg, onToolsChanged, keepAlive)
 
 	base := transport
 	if base == nil {
@@ -425,6 +474,10 @@ func newMCPHTTPClient(cfg MCPServerConfig, onToolsChanged func(), transport http
 // startMCPStdioClient prepares (but does not start) a stdio subprocess. The SDK's
 // CommandTransport owns Start/Wait, so the process is only spawned on Initialize.
 func startMCPStdioClient(cfg MCPServerConfig, resolvedExecutable string, resolvedPATH string, onToolsChanged func()) (*mcpSDKClient, error) {
+	return startMCPStdioClientWithKeepAlive(cfg, resolvedExecutable, resolvedPATH, onToolsChanged, 0)
+}
+
+func startMCPStdioClientWithKeepAlive(cfg MCPServerConfig, resolvedExecutable string, resolvedPATH string, onToolsChanged func(), keepAlive time.Duration) (*mcpSDKClient, error) {
 	if strings.TrimSpace(resolvedExecutable) == "" {
 		return nil, fmt.Errorf("stdio command is empty")
 	}
@@ -440,7 +493,7 @@ func startMCPStdioClient(cfg MCPServerConfig, resolvedExecutable string, resolve
 	stderrBuf := newRingBuffer(mcpStderrRingBytes)
 	cmd.Stderr = stderrBuf
 
-	c := newMCPClientBase(cfg, onToolsChanged)
+	c := newMCPClientBase(cfg, onToolsChanged, keepAlive)
 	c.cmd = cmd
 	c.stderrBuf = stderrBuf
 	c.transport = &mcp.CommandTransport{
@@ -453,6 +506,13 @@ func startMCPStdioClient(cfg MCPServerConfig, resolvedExecutable string, resolve
 func (c *mcpSDKClient) Done() <-chan struct{} { return c.doneCh }
 
 func (c *mcpSDKClient) Close() error {
+	return c.CloseWithCause(nil)
+}
+
+// CloseWithCause closes the generation and records cause as its WaitError when
+// the caller already knows why the connection is being torn down (for example a
+// runtime HTTP 404 session expiry).
+func (c *mcpSDKClient) CloseWithCause(cause error) error {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -464,7 +524,7 @@ func (c *mcpSDKClient) Close() error {
 
 	// Signal the generation end immediately: MCPService's supervisor must not wait
 	// on transport teardown (stdio may sit in SIGTERM/SIGKILL escalation).
-	c.markDone(nil)
+	c.markDone(cause)
 
 	var closeErr error
 	if session != nil {
@@ -486,15 +546,24 @@ func (c *mcpSDKClient) Close() error {
 	return closeErr
 }
 
+func (c *mcpSDKClient) WaitError() error {
+	c.waitMu.Lock()
+	defer c.waitMu.Unlock()
+	return c.waitErr
+}
+
 func (c *mcpSDKClient) markDone(waitErr error) {
 	c.doneOnce.Do(func() {
 		// A nil wait error means a graceful local close; anything else is the
 		// transport dying on its own (stdio exit, HTTP session loss) and is worth
-		// one redacted diagnostic line before the supervisor rebuilds the generation.
+		// preserving for the supervisor's LastError as well as logging once.
 		if waitErr != nil {
-			log.Printf("mcp(%s): connection ended: %s", c.cfg.Name, redactMCPSecrets(waitErr.Error(), c.cfg))
-		}
-		if c.stderrBuf != nil {
+			recorded := c.withStdioStderr(waitErr)
+			c.waitMu.Lock()
+			c.waitErr = recorded
+			c.waitMu.Unlock()
+			log.Printf("mcp(%s): connection ended: %s", c.cfg.Name, redactMCPSecrets(recorded.Error(), c.cfg))
+		} else if c.stderrBuf != nil {
 			if tail := c.recentStderr(); tail != "" {
 				log.Printf("mcp(%s): stdio server stderr: %s", c.cfg.Name, redactMCPSecrets(tail, c.cfg))
 			}
@@ -692,22 +761,12 @@ func wireToolFromSDK(tool *mcp.Tool) mcpWireTool {
 	if tool == nil {
 		return mcpWireTool{}
 	}
-	out := mcpWireTool{
-		Name:        tool.Name,
-		Description: tool.Description,
-		InputSchema: toJSONSchemaObject(tool.InputSchema),
+	return mcpWireTool{
+		Name:         tool.Name,
+		Description:  tool.Description,
+		InputSchema:  toJSONSchemaObject(tool.InputSchema),
+		ReadOnlyHint: tool.Annotations != nil && tool.Annotations.ReadOnlyHint,
 	}
-	if ann := tool.Annotations; ann != nil {
-		readOnly := ann.ReadOnlyHint
-		idempotent := ann.IdempotentHint
-		out.Annotations = &mcpWireToolAnnotations{
-			ReadOnlyHint:    &readOnly,
-			DestructiveHint: ann.DestructiveHint,
-			IdempotentHint:  &idempotent,
-			OpenWorldHint:   ann.OpenWorldHint,
-		}
-	}
-	return out
 }
 
 // toJSONSchemaObject normalizes the SDK's `InputSchema any` into the map form the

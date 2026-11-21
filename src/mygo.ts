@@ -98,6 +98,8 @@ export interface MCPServerConfig {
   toolLoading?: string;
   trustServer?: boolean;
   toolCallTimeoutMs?: number;
+  /** 0=transport default (30s HTTP, off stdio); <0=disabled */
+  keepAliveMs?: number;
   reconnect?: MCPReconnectConfig;
   /** Streamable HTTP fields */
   url?: string;
