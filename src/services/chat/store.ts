@@ -14,6 +14,11 @@ import {
 } from '../workspace/store.js'
 import type { PermissionMode } from '../workspace/types.js'
 import {
+  buildMCPSystemPromptSection,
+  clearSessionMCPTools,
+  getActiveMCPToolsForSession,
+} from '../mcp/store.js'
+import {
   buildSkillCatalogReminder,
   refreshSkills,
   resolveExplicitSkillReminder,
@@ -67,15 +72,15 @@ const FILE_RETRY_BASE_DELAY = 1000
 /** 单轮 Agent Loop 最大工具往返步数，防止死循环 */
 const MAX_AGENT_STEPS = 25
 
-/** 阅读链接始终开启，智能搜索开关控制是否另行声明搜索工具，同时挂载客户端内置文件工具。 */
-const requestTools = (search: boolean): CreateMessageRequest['tools'] => {
+/** 阅读链接始终开启，智能搜索开关控制是否另行声明搜索工具，同时挂载客户端内置文件工具与已连接的 MCP 工具。 */
+const requestTools = (search: boolean, sessionId: string): CreateMessageRequest['tools'] => {
   const tools: CreateMessageRequest['tools'] = [
     { type: 'deepseek_read_url', name: 'deepseek_read_url' },
   ]
   if (search) {
     tools.push({ type: 'deepseek_web_search', name: 'deepseek_web_search' })
   }
-  tools.push(...CLIENT_FILE_TOOLS)
+  tools.push(...CLIENT_FILE_TOOLS, ...getActiveMCPToolsForSession(sessionId))
   return tools
 }
 
@@ -710,6 +715,7 @@ const removeSessionData = async (
       return false
     }
     await db.deleteSession(id)
+    clearSessionMCPTools(id)
     void ToolService.clearSessionApprovals(id).catch(() => {})
     if (hasScratch && options?.removeScratchDir) {
       await WorkspaceService.removeScratchDir(id).catch(() => {})
@@ -1254,6 +1260,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
             ...getSessionAgentContext(sessionId),
             skillsReminder,
             invokedSkillReminder,
+            mcpPromptSection: buildMCPSystemPromptSection(),
           }
           const events = streamMessage(
             useSettings.getState().apiKey ?? '',
@@ -1264,7 +1271,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
               thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' },
               ...(thinkingEnabled ? { output_config: { effort } } : {}),
               safety_check: SAFETY_CHECK,
-              tools: requestTools(initial.search ?? false),
+              tools: requestTools(initial.search ?? false, sessionId),
               ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
             },
             controller.signal

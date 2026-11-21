@@ -9,9 +9,27 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/egoist/mygo"
 )
+
+var (
+	mainWindowMu sync.RWMutex
+	mainWindow   *mygo.Window
+)
+
+func setMainWindow(w *mygo.Window) {
+	mainWindowMu.Lock()
+	mainWindow = w
+	mainWindowMu.Unlock()
+}
+
+func getMainWindow() *mygo.Window {
+	mainWindowMu.RLock()
+	defer mainWindowMu.RUnlock()
+	return mainWindow
+}
 
 //go:embed package.json
 var packageJSON []byte
@@ -232,6 +250,7 @@ func main() {
 	mygo.Bind(FileService{})
 	mygo.Bind(WorkspaceService{})
 	mygo.Bind(SkillService{})
+	mygo.Bind(globalMCPService)
 	mygo.Bind(globalToolService)
 	mygo.Bind(globalUpdateService)
 
@@ -247,9 +266,12 @@ func main() {
 			StateKey:        "main_window",
 			URL:             "/",
 		})
+		setMainWindow(win)
 		setupMenu(win)
+		go globalMCPService.Start()
 	})
 
+	defer globalMCPService.StopAll()
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}

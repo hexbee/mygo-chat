@@ -98,6 +98,9 @@ export type ToolUIMeta = {
   skillName?: string
   skillScope?: string
   skillPath?: string
+  mcpServer?: string
+  mcpTool?: string
+  mcpLoadedTools?: string[]
 }
 
 /** 客户端工具调用块 */

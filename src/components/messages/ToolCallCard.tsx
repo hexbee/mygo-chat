@@ -31,6 +31,12 @@ const summarizeToolCall = (name: string, input: Record<string, unknown>): string
     case 'skill':
       return str('name')
     default:
+      if (name.startsWith('mcp__') && name.endsWith('__load_tools')) {
+        const tools = Array.isArray(input.tools)
+          ? input.tools.filter((v): v is string => typeof v === 'string')
+          : []
+        return tools.join(', ')
+      }
       return ''
   }
 }
@@ -130,6 +136,11 @@ export const ToolCallCard = memo(function ToolCallCard({
           <span className={styles.toolName}>{step.use.name}</span>
           {sandboxed ? <span className={styles.metaBadge}>{t('toolSandboxedBadge')}</span> : null}
           {skillName ? <span className={styles.metaBadge}>{t('skillLoadedBadge')}</span> : null}
+          {uiMeta?.mcpServer || step.use.name.startsWith('mcp__') ? (
+            <span className={styles.metaBadge}>
+              {uiMeta?.mcpServer ? `MCP · ${uiMeta.mcpServer}` : 'MCP'}
+            </span>
+          ) : null}
           {summary ? (
             <span className={styles.summary} title={summary}>
               {summary}

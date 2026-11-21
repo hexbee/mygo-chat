@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -34,7 +35,7 @@ var globalToolService = &ToolService{
 
 // ToolClassifyResult represents the pre-execution policy decision for a tool call.
 type ToolClassifyResult struct {
-	Decision        string `json:"decision"`                  // "allow" | "ask" | "deny"
+	Decision        string `json:"decision"` // "allow" | "ask" | "deny"
 	Reason          string `json:"reason"`
 	SessionAllowKey string `json:"sessionAllowKey,omitempty"` // Non-empty when UI may offer "Allow for this session"
 }
@@ -165,6 +166,15 @@ func (s *ToolService) ClassifyToolCall(req ToolExecuteRequest) ToolClassifyResul
 	if req.ToolName == "job_output" || req.ToolName == "job_kill" || req.ToolName == "skill" {
 		return ToolClassifyResult{Decision: DecisionAllow}
 	}
+	if strings.HasPrefix(req.ToolName, "mcp__") {
+		res := globalMCPService.classifyMCPToolCall(req, perm)
+		if perm == PermissionWorkspaceWrite && res.Decision == DecisionAsk && res.SessionAllowKey != "" {
+			if s.isSessionAllowed(req.SessionID, res.SessionAllowKey) {
+				return ToolClassifyResult{Decision: DecisionAllow}
+			}
+		}
+		return res
+	}
 	if isReadFileTool(req.ToolName) || isWriteFileTool(req.ToolName) {
 		return classifyFileToolCall(req, perm)
 	}
@@ -232,6 +242,9 @@ func (s *ToolService) ExecuteTool(req ToolExecuteRequest) (ToolExecuteResult, er
 	case "skill":
 		return executeSkill(req)
 	default:
+		if strings.HasPrefix(req.ToolName, "mcp__") {
+			return globalMCPService.executeMCPTool(ctx, req)
+		}
 		return ToolExecuteResult{
 			ModelContent: fmt.Sprintf("Unsupported tool: %s", req.ToolName),
 			IsError:      true,

@@ -1,5 +1,6 @@
 import { ToolService, type ToolExecuteRequest } from '../../mygo.js'
 import type { ClientToolDefinition } from '../api/types.js'
+import { isMCPReadOnlyTool, markSessionMCPToolsLoaded } from '../mcp/store.js'
 import { useSettings } from '../settings.js'
 import type { PermissionMode } from '../workspace/types.js'
 import type {
@@ -11,6 +12,9 @@ import type {
 
 const READ_ONLY_TOOLS = new Set(['read', 'glob', 'grep', 'job_output', 'skill'])
 const READ_CONCURRENCY_LIMIT = 4
+
+const isReadOnlyToolName = (name: string): boolean =>
+  READ_ONLY_TOOLS.has(name) || isMCPReadOnlyTool(name)
 
 /** 暴露给 DeepSeek API 的内置文件、命令执行、后台任务与 Skills 工具定义 */
 export const CLIENT_FILE_TOOLS: ClientToolDefinition[] = [
@@ -223,9 +227,10 @@ export type AgentWorkspaceContext = {
   permissionMode: PermissionMode
   skillsReminder?: string
   invokedSkillReminder?: string
+  mcpPromptSection?: string
 }
 
-/** 组装包含工作区状态、权限边界与 Skills 渐进式摘要的系统提示，避免普通闲聊误触磁盘探测 */
+/** 组装包含工作区状态、权限边界、Skills 渐进式摘要与 MCP 指令/按需目录的系统提示，避免普通闲聊误触磁盘探测 */
 export const buildAgentSystemPrompt = (
   basePrompt: string,
   ctx: AgentWorkspaceContext
@@ -264,6 +269,9 @@ export const buildAgentSystemPrompt = (
   }
   if (ctx.invokedSkillReminder) {
     parts.push(ctx.invokedSkillReminder)
+  }
+  if (ctx.mcpPromptSection) {
+    parts.push(ctx.mcpPromptSection)
   }
 
   return parts.join('\n')
@@ -306,6 +314,18 @@ const parseToolUIMeta = (raw?: Record<string, unknown>): ToolUIMeta | undefined 
   }
   if (typeof raw.skillPath === 'string' && raw.skillPath) {
     meta.skillPath = raw.skillPath
+  }
+  if (typeof raw.mcpServer === 'string' && raw.mcpServer) {
+    meta.mcpServer = raw.mcpServer
+  }
+  if (typeof raw.mcpTool === 'string' && raw.mcpTool) {
+    meta.mcpTool = raw.mcpTool
+  }
+  if (Array.isArray(raw.mcpLoadedTools)) {
+    const loaded = raw.mcpLoadedTools.filter((item): item is string => typeof item === 'string')
+    if (loaded.length > 0) {
+      meta.mcpLoadedTools = loaded
+    }
   }
   if (Array.isArray(raw.producedFiles)) {
     const files = raw.producedFiles.filter((item): item is string => typeof item === 'string')
@@ -462,6 +482,9 @@ const runSingleTool = async (
       ctx.onAssignedScratch(res.assignedScratch)
     }
     const uiMeta = parseToolUIMeta(res.uiMeta) ?? {}
+    if (!res.isError && uiMeta.mcpServer && uiMeta.mcpLoadedTools?.length) {
+      markSessionMCPToolsLoaded(ctx.sessionId, uiMeta.mcpServer, uiMeta.mcpLoadedTools)
+    }
     if (approvedOnce) {
       uiMeta.approvalStatus = 'approved'
       uiMeta.approvalReason = classification.reason
@@ -500,7 +523,7 @@ export const executeClientToolCalls = async (
 
   while (index < calls.length) {
     const call = calls[index]
-    if (!READ_ONLY_TOOLS.has(call.name)) {
+    if (!isReadOnlyToolName(call.name)) {
       const result = await runSingleTool(call, ctx)
       results[index] = result
       ctx.onResult?.(result)
@@ -510,7 +533,7 @@ export const executeClientToolCalls = async (
 
     // 收集连续只读工具批次，有界并发执行
     const batchStart = index
-    while (index < calls.length && READ_ONLY_TOOLS.has(calls[index].name)) {
+    while (index < calls.length && isReadOnlyToolName(calls[index].name)) {
       index += 1
     }
     const batchEnd = index

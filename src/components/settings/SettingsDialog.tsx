@@ -34,6 +34,7 @@ import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
 import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
 import { CommandBlacklistSetting } from './CommandBlacklistSetting.js'
+import { McpSetting } from './McpSetting.js'
 import { SkillsSetting } from './SkillsSetting.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import { nativeOpenFile, nativeSaveFile } from '../../services/desktop/dialog.js'
@@ -79,6 +80,28 @@ const sections: { value: SettingsSection; label: TranslationKey; icon: ReactNode
           d="M8 2L9.7 5.8L13.8 6.3L10.7 9.1L11.6 13.2L8 11.1L4.4 13.2L5.3 9.1L2.2 6.3L6.3 5.8L8 2Z"
           stroke="currentColor"
           strokeWidth="1.3"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    value: 'mcp',
+    label: 'settingDialogAsideMcpOptionLabel',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M3.5 11.75L11.67 3.58C12.78 2.47 14.57 2.47 15.67 3.58C16.78 4.68 16.78 6.47 15.67 7.58M15.67 7.58L9.5 13.75M15.67 7.58C16.78 6.47 18.57 6.47 19.67 7.58C20.78 8.68 20.78 10.47 19.67 11.58L12.71 18.54C12.32 18.93 12.32 19.57 12.71 19.96L14 21.25"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M17.5 9.75L11.33 15.92C10.22 17.03 8.43 17.03 7.33 15.92C6.22 14.82 6.22 13.03 7.33 11.92L13.5 5.75"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
           strokeLinejoin="round"
         />
       </svg>
@@ -139,6 +162,8 @@ const SettingsContent = () => {
             <CommandBlacklistSetting />
           ) : section === 'skills' ? (
             <SkillsSetting />
+          ) : section === 'mcp' ? (
+            <McpSetting />
           ) : (
             <>
               <ApiKeyField editor={apiKeyEditor} />

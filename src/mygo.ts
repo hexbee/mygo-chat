@@ -46,6 +46,116 @@ export interface FilePreview {
   truncated: boolean;
 }
 
+/** MCPImportResult returns validation diagnostics and parsed servers for JSON import. */
+export interface MCPImportResult {
+  valid: boolean;
+  applied: boolean;
+  count: number;
+  names?: string[];
+  errors?: MCPValidationError[];
+}
+
+/** MCPProbeResult is the stage-classified outcome of a one-shot side-effect-free probe. */
+export interface MCPProbeResult {
+  ok: boolean;
+  /** validate | runtime | connect | list */
+  stage: string;
+  serverInfo?: MCPServerInfo;
+  toolCount: number;
+  tools?: MCPToolInfo[];
+  truncated?: boolean;
+  instructions?: string;
+  durationMs: number;
+  message?: string;
+  runtimeHint?: MCPRuntimeCheck;
+}
+
+/** MCPReconnectConfig controls bounded exponential backoff reconnection for a server. */
+export interface MCPReconnectConfig {
+  enabled: boolean;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  maxAttempts?: number;
+}
+
+/** MCPRuntimeCheck reports the preflight lookup result for a stdio command. */
+export interface MCPRuntimeCheck {
+  found: boolean;
+  command: string;
+  resolvedPath?: string;
+  /** "npx" | "uvx" | "binary" */
+  kind: string;
+  message?: string;
+}
+
+/** MCPServerConfig defines one configured MCP server persisted in ~/.vela/mcp.json. */
+export interface MCPServerConfig {
+  name: string;
+  /** "streamable-http" | "stdio" */
+  transport: string;
+  enabled: boolean;
+  /** "on-demand" (default) | "eager" */
+  toolLoading?: string;
+  trustServer?: boolean;
+  toolCallTimeoutMs?: number;
+  reconnect?: MCPReconnectConfig;
+  /** Streamable HTTP fields */
+  url?: string;
+  headers?: Record<string, string>;
+  /** Stdio fields */
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+}
+
+/** MCPServerInfo carries the server identity returned by MCP initialize. */
+export interface MCPServerInfo {
+  name: string;
+  version?: string;
+}
+
+/** MCPServerStatus is the live runtime status of a single MCP server. */
+export interface MCPServerStatus {
+  name: string;
+  transport: string;
+  enabled: boolean;
+  /** disabled | connecting | connected | reconnecting | error | missing-runtime */
+  state: string;
+  toolCount: number;
+  serverInfo?: MCPServerInfo;
+  instructions?: string;
+  tools?: MCPToolInfo[];
+  lastError?: string;
+  runtimeHint?: MCPRuntimeCheck;
+  attempt?: number;
+  maxAttempts?: number;
+  nextRetryAtMs?: number;
+  connectedAtMs?: number;
+}
+
+/** MCPSnapshot is pushed to the frontend via MCPStateEvent and returned by GetSnapshot. */
+export interface MCPSnapshot {
+  servers: MCPServerConfig[];
+  statuses: Record<string, MCPServerStatus>;
+}
+
+/** MCPToolInfo describes a single tool bridged from an MCP server. */
+export interface MCPToolInfo {
+  publicName: string;
+  rawName: string;
+  serverName: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  readOnlyHint: boolean;
+}
+
+/** MCPValidationError describes one field-level configuration validation issue. */
+export interface MCPValidationError {
+  field: string;
+  message: string;
+}
+
 /** MenuAction represents an action triggered from the native application menu or its shortcuts. */
 export type MenuAction = "check-update" | "open-settings" | "new-chat" | "search-chats" | "toggle-sidebar";
 
@@ -259,6 +369,57 @@ export const SkillService = {
   },
 } as const;
 
+/**
+ * MCPService manages MCP server configurations (~/.vela/mcp.json), supervised connections,
+ * tool snapshots, one-shot probes, and tool execution dispatch.
+ */
+export const MCPService = {
+  /** CheckRuntime runs a real-time LookPath preflight for a stdio command using the login shell PATH. */
+  checkRuntime(command: string): Promise<MCPRuntimeCheck> {
+    return call("MCPService.CheckRuntime", command);
+  },
+  /** DeleteServer stops and removes a configured MCP server from ~/.vela/mcp.json. */
+  deleteServer(name: string): Promise<MCPSnapshot> {
+    return call("MCPService.DeleteServer", name);
+  },
+  /** ExportConfigJSON returns the current server configs formatted as `{ "mcpServers": { ... } }`. */
+  exportConfigJSON(): Promise<string> {
+    return call("MCPService.ExportConfigJSON");
+  },
+  /** GetSnapshot returns all configured MCP servers and their live runtime statuses. */
+  getSnapshot(): Promise<MCPSnapshot> {
+    return call("MCPService.GetSnapshot");
+  },
+  /** ImportConfigJSON validates a `{ "mcpServers": { ... } }` snippet and optionally applies it. */
+  importConfigJSON(rawJSON: string, apply: boolean): Promise<MCPImportResult> {
+    return call("MCPService.ImportConfigJSON", rawJSON, apply);
+  },
+  /** ProbeServer performs a one-shot, side-effect-free connection + tools/list check. */
+  probeServer(cfg: MCPServerConfig): Promise<MCPProbeResult> {
+    return call("MCPService.ProbeServer", cfg);
+  },
+  /** RestartServer resets the reconnect budget and reconnects an enabled MCP server. */
+  restartServer(name: string): Promise<MCPSnapshot> {
+    return call("MCPService.RestartServer", name);
+  },
+  /** SetServerEnabled enables or disables an existing MCP server. */
+  setServerEnabled(name: string, enabled: boolean): Promise<MCPSnapshot> {
+    return call("MCPService.SetServerEnabled", name, enabled);
+  },
+  /** Start loads ~/.vela/mcp.json and asynchronously connects all enabled servers. */
+  start(): Promise<void> {
+    return call("MCPService.Start");
+  },
+  /** StopAll shuts down all active MCP server connections cleanly. */
+  stopAll(): Promise<void> {
+    return call("MCPService.StopAll");
+  },
+  /** UpsertServer validates, persists, and starts or stops an MCP server configuration. */
+  upsertServer(cfg: MCPServerConfig): Promise<MCPSnapshot> {
+    return call("MCPService.UpsertServer", cfg);
+  },
+} as const;
+
 /** ToolService exposes Go-native file and shell tools to the frontend via mygo.Bind. */
 export const ToolService = {
   /** CancelSessionTools cancels all active tool executions (including running bash process groups) for sessionID. */
@@ -327,4 +488,6 @@ export const events = {
    * avoiding synchronous Page.Eval re-entrancy deadlocks inside Windows WebView2's AcceleratorKeyPressed handler.
    */
   menuAction: event<MenuAction>("menu:action"),
+  /** MCPStateEvent pushes live MCP server configuration and connection status updates to the frontend. */
+  mcpState: event<MCPSnapshot>("mcp:state"),
 } as const;
