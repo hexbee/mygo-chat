@@ -265,7 +265,7 @@ Follow project rules.
 	}
 
 	svc := SkillService{}
-	catalog, err := svc.ListSkills(wsDir)
+	catalog, err := svc.ListSkills(wsDir, nil)
 	if err != nil {
 		t.Fatalf("ListSkills failed: %v", err)
 	}
@@ -306,7 +306,7 @@ Follow project rules.
 		t.Fatalf("expected skillScope=project, got %#v", res.UIMeta)
 	}
 
-	// Verify ~/.agent/skills/ and symlinked skill directories are discovered even without a workspace.
+	// Verify custom user directory (e.g. ~/.agent/skills/), symlinks, priority ordering, inspection, and disable toggle.
 	realTarget := filepath.Join(t.TempDir(), "linked-skill-src")
 	if err := os.MkdirAll(realTarget, 0o755); err != nil {
 		t.Fatal(err)
@@ -327,18 +327,48 @@ Linked skill body.
 		t.Fatal(err)
 	}
 
-	noWsCatalog, err := svc.ListSkills("")
-	if err != nil {
-		t.Fatalf("ListSkills(\"\") failed: %v", err)
+	customCfg := &SkillConfig{
+		ProjectDirs:    []string{".agents/skills", ".vela/skills"},
+		UserDirs:       []string{"~/.agent/skills", "~/.vela/skills"},
+		DisabledSkills: []string{"quick-note"},
 	}
-	foundLinked := false
-	for _, s := range noWsCatalog.Skills {
-		if s.Name == "linked-agent-skill" && s.Scope == skillScopeUser {
-			foundLinked = true
+	customCatalog, err := svc.ListSkills(wsDir, customCfg)
+	if err != nil {
+		t.Fatalf("ListSkills with customCfg failed: %v", err)
+	}
+	// shared-skill (project) + linked-agent-skill (user); quick-note is disabled!
+	if len(customCatalog.Skills) != 2 {
+		t.Fatalf("expected 2 enabled skills with quick-note disabled, got %#v", customCatalog.Skills)
+	}
+	if _, rErr := svc.ReadSkill("quick-note", wsDir, customCfg); rErr == nil {
+		t.Fatalf("expected ReadSkill to reject disabled skill quick-note")
+	}
+
+	// InspectSkills should report directories, shadowed shared-skill in ~/.vela/skills, and disabled quick-note.
+	insp, err := svc.InspectSkills(wsDir, customCfg)
+	if err != nil {
+		t.Fatalf("InspectSkills failed: %v", err)
+	}
+	if len(insp.Directories) != 4 {
+		t.Fatalf("expected 4 directory reports, got %d", len(insp.Directories))
+	}
+	if insp.ActiveCount != 2 {
+		t.Fatalf("expected ActiveCount=2, got %d", insp.ActiveCount)
+	}
+	// Last directory (~/.vela/skills) should mark shared-skill as overridden by .agents/skills and quick-note as disabled.
+	velaReport := insp.Directories[3]
+	foundShadowed := false
+	foundDisabled := false
+	for _, entry := range velaReport.Skills {
+		if entry.Name == "shared-skill" && entry.OverriddenBy == ".agents/skills" {
+			foundShadowed = true
+		}
+		if entry.Name == "quick-note" && !entry.Enabled {
+			foundDisabled = true
 		}
 	}
-	if !foundLinked {
-		t.Fatalf("expected symlinked skill in ~/.agent/skills to be discovered without workspace, got %#v", noWsCatalog.Skills)
+	if !foundShadowed || !foundDisabled {
+		t.Fatalf("expected shadowed shared-skill and disabled quick-note in ~/.vela/skills report, got %#v", velaReport)
 	}
 }
 

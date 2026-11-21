@@ -55,7 +55,16 @@ export const DEFAULT_APPROVAL_BLACKLIST: readonly string[] = [
   'cargo publish',
 ]
 
-/** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、模型、推理等级、权限默认值、审批黑名单、深度思考与智能搜索开关、侧边栏收起状态 */
+export const DEFAULT_SKILL_PROJECT_DIRS: readonly string[] = ['.agents/skills', '.vela/skills']
+export const DEFAULT_SKILL_USER_DIRS: readonly string[] = ['~/.agents/skills', '~/.vela/skills']
+
+export type SkillSettings = {
+  projectDirs: string[]
+  userDirs: string[]
+  disabledSkills: string[]
+}
+
+/** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、模型、推理等级、权限默认值、审批黑名单、Skills 配置、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
   apiKey: string | null
   locale: Locale
@@ -66,6 +75,7 @@ type Settings = {
   reasoningEffort: ReasoningEffort
   defaultPermissionMode: PermissionMode
   approvalBlacklist: string[]
+  skillConfig: SkillSettings
   thinking: boolean
   search: boolean
   siderCollapsed: boolean
@@ -81,6 +91,7 @@ const KEYS = {
   reasoningEffort: 'chat-demo:reasoning-effort',
   permissionMode: 'chat-demo:permission-mode',
   approvalBlacklist: 'chat-demo:approval-blacklist',
+  skillConfig: 'chat-demo:skill-config',
   thinking: 'chat-demo:thinking',
   search: 'chat-demo:search',
   siderCollapsed: 'chat-demo:sider-collapsed',
@@ -198,6 +209,72 @@ const initialApprovalBlacklist = (): string[] => {
   return [...DEFAULT_APPROVAL_BLACKLIST]
 }
 
+const normalizeDirList = (items: readonly string[]): string[] => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of items) {
+    const trimmed = item.trim()
+    if (!trimmed || seen.has(trimmed)) {
+      continue
+    }
+    seen.add(trimmed)
+    out.push(trimmed)
+  }
+  return out
+}
+
+const normalizeSkillNameList = (items: readonly string[]): string[] => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of items) {
+    const trimmed = item.trim()
+    if (!trimmed) {
+      continue
+    }
+    const key = trimmed.toLowerCase()
+    if (!seen.has(key)) {
+      seen.add(key)
+      out.push(trimmed)
+    }
+  }
+  return out
+}
+
+const defaultSkillSettings = (): SkillSettings => ({
+  projectDirs: [...DEFAULT_SKILL_PROJECT_DIRS],
+  userDirs: [...DEFAULT_SKILL_USER_DIRS],
+  disabledSkills: [],
+})
+
+const initialSkillConfig = (): SkillSettings => {
+  const raw = read(KEYS.skillConfig)
+  if (!raw) {
+    return defaultSkillSettings()
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>
+      return {
+        projectDirs: Array.isArray(obj.projectDirs)
+          ? normalizeDirList(obj.projectDirs.filter((v): v is string => typeof v === 'string'))
+          : [...DEFAULT_SKILL_PROJECT_DIRS],
+        userDirs: Array.isArray(obj.userDirs)
+          ? normalizeDirList(obj.userDirs.filter((v): v is string => typeof v === 'string'))
+          : [...DEFAULT_SKILL_USER_DIRS],
+        disabledSkills: Array.isArray(obj.disabledSkills)
+          ? normalizeSkillNameList(
+              obj.disabledSkills.filter((v): v is string => typeof v === 'string')
+            )
+          : [],
+      }
+    }
+  } catch {
+    // fall back to defaults
+  }
+  return defaultSkillSettings()
+}
+
 const bootReasoningEffort = initialReasoningEffort()
 
 export const useSettings = create<Settings>(() => ({
@@ -210,6 +287,7 @@ export const useSettings = create<Settings>(() => ({
   reasoningEffort: bootReasoningEffort,
   defaultPermissionMode: initialPermissionMode(),
   approvalBlacklist: initialApprovalBlacklist(),
+  skillConfig: initialSkillConfig(),
   thinking: bootReasoningEffort !== 'off',
   search: read(KEYS.search) === 'true',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
@@ -267,6 +345,37 @@ export const setApprovalBlacklist = (rules: readonly string[]) => {
 export const resetApprovalBlacklist = () => {
   write(KEYS.approvalBlacklist, null)
   useSettings.setState({ approvalBlacklist: [...DEFAULT_APPROVAL_BLACKLIST] })
+}
+
+const saveSkillConfig = (skillConfig: SkillSettings) => {
+  write(KEYS.skillConfig, JSON.stringify(skillConfig))
+  useSettings.setState({ skillConfig })
+}
+
+export const setSkillProjectDirs = (dirs: readonly string[]) => {
+  const current = useSettings.getState().skillConfig
+  saveSkillConfig({ ...current, projectDirs: normalizeDirList(dirs) })
+}
+
+export const setSkillUserDirs = (dirs: readonly string[]) => {
+  const current = useSettings.getState().skillConfig
+  saveSkillConfig({ ...current, userDirs: normalizeDirList(dirs) })
+}
+
+export const toggleSkillEnabled = (skillName: string, enabled: boolean) => {
+  const current = useSettings.getState().skillConfig
+  const key = skillName.trim().toLowerCase()
+  if (!key) {
+    return
+  }
+  const filtered = current.disabledSkills.filter((item) => item.toLowerCase() !== key)
+  const nextDisabled = enabled ? filtered : normalizeSkillNameList([...filtered, skillName.trim()])
+  saveSkillConfig({ ...current, disabledSkills: nextDisabled })
+}
+
+export const resetSkillConfig = () => {
+  write(KEYS.skillConfig, null)
+  useSettings.setState({ skillConfig: defaultSkillSettings() })
 }
 
 export const setThinking = (thinking: boolean) => {

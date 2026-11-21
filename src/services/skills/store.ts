@@ -1,5 +1,11 @@
 import { create } from 'zustand'
-import { SkillService, type SkillCatalog, type SkillDocument, type SkillSummary } from '../../mygo.js'
+import {
+  SkillService,
+  type SkillCatalog,
+  type SkillDocument,
+  type SkillSummary,
+} from '../../mygo.js'
+import { useSettings } from '../settings.js'
 
 type SkillState = {
   workdir: string
@@ -20,15 +26,19 @@ const { getState: get, setState: set } = useSkillStore
 let inFlightKey = ''
 let inFlightTask: Promise<SkillCatalog> | null = null
 
+const currentSkillConfig = () => useSettings.getState().skillConfig
+
 /** 扫描当前工作区与用户目录下的可用 Skills，返回摘要与 digest */
 export const refreshSkills = async (workdir: string): Promise<SkillCatalog> => {
   const normalized = workdir.trim()
-  if (inFlightTask && inFlightKey === normalized) {
+  const cfg = currentSkillConfig()
+  const key = `${normalized}|${JSON.stringify(cfg)}`
+  if (inFlightTask && inFlightKey === key) {
     return inFlightTask
   }
-  inFlightKey = normalized
+  inFlightKey = key
   set({ loading: true })
-  const task = SkillService.listSkills(normalized)
+  const task = SkillService.listSkills(normalized, cfg)
     .then((catalog) => {
       const skills = Array.isArray(catalog?.skills) ? catalog.skills : []
       const digest = catalog?.digest ?? ''
@@ -52,6 +62,13 @@ export const refreshSkills = async (workdir: string): Promise<SkillCatalog> => {
   inFlightTask = task
   return task
 }
+
+// 配置变动（目录增删、顺序调整、启停开关）时立即刷新当前工作区的 Skills，确保输入框 / 菜单实时生效。
+useSettings.subscribe((state, prev) => {
+  if (state.skillConfig !== prev.skillConfig) {
+    void refreshSkills(get().workdir)
+  }
+})
 
 /** 构造渐进式 Skills 摘要目录的 <system-reminder> 块（按需由模型调用 skill 工具读全文） */
 export const buildSkillCatalogReminder = (catalog: SkillCatalog): string => {
@@ -87,7 +104,11 @@ export const resolveExplicitSkillReminder = async (
     return ''
   }
   try {
-    const doc: SkillDocument = await SkillService.readSkill(skillName, workdir)
+    const doc: SkillDocument = await SkillService.readSkill(
+      skillName,
+      workdir,
+      currentSkillConfig()
+    )
     if (!doc?.content) {
       return ''
     }

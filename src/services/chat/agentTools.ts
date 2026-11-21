@@ -377,6 +377,7 @@ const runSingleTool = async (
   }
 
   const workdir = ctx.getWorkdir()
+  const settings = useSettings.getState()
   const req: ToolExecuteRequest = {
     sessionId: ctx.sessionId,
     toolName: call.name,
@@ -384,7 +385,8 @@ const runSingleTool = async (
     workdir,
     permissionMode: ctx.permissionMode,
     approved: false,
-    approvalBlacklist: useSettings.getState().approvalBlacklist,
+    approvalBlacklist: settings.approvalBlacklist,
+    skillConfig: settings.skillConfig,
   }
 
   try {

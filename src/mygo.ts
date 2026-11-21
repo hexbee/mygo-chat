@@ -49,10 +49,37 @@ export interface FilePreview {
 /** MenuAction represents an action triggered from the native application menu or its shortcuts. */
 export type MenuAction = "check-update" | "open-settings" | "new-chat" | "search-chats" | "toggle-sidebar";
 
-/** SkillCatalog contains all discovered skills and a stable content digest. */
+/** SkillCatalog contains all active (enabled) discovered skills and a stable content digest. */
 export interface SkillCatalog {
   skills: SkillSummary[];
   digest: string;
+}
+
+/** SkillConfig controls skill discovery directories, precedence order, and per-skill enablement. */
+export interface SkillConfig {
+  projectDirs?: string[];
+  userDirs?: string[];
+  disabledSkills?: string[];
+}
+
+/** SkillDirEntry describes one skill discovered inside a specific configured directory. */
+export interface SkillDirEntry {
+  name: string;
+  description: string;
+  path: string;
+  baseDir: string;
+  enabled: boolean;
+  overriddenBy?: string;
+}
+
+/** SkillDirReport describes the scan result of one configured skill directory. */
+export interface SkillDirReport {
+  /** "project" | "user" */
+  scope: string;
+  configured: string;
+  resolvedPath: string;
+  exists: boolean;
+  skills: SkillDirEntry[];
 }
 
 /** SkillDocument contains the full instructions of a loaded skill. */
@@ -63,6 +90,13 @@ export interface SkillDocument {
   path: string;
   baseDir: string;
   content: string;
+}
+
+/** SkillInspection is the full directory-by-directory view used by the Settings UI. */
+export interface SkillInspection {
+  directories: SkillDirReport[];
+  activeCount: number;
+  totalCount: number;
 }
 
 /** SkillSummary describes a discovered skill for progressive catalog disclosure. */
@@ -100,6 +134,8 @@ export interface ToolExecuteRequest {
   allowSession?: boolean;
   /** User-configured command blacklist for sandboxed workspace-write mode (nil uses defaults) */
   approvalBlacklist?: string[];
+  /** User-configured skill directories, priority order, and disabled skills */
+  skillConfig?: SkillConfig;
 }
 
 /** ToolExecuteResult separates concise model output from rich UI metadata. */
@@ -186,15 +222,25 @@ export const WorkspaceService = {
   },
 } as const;
 
-/** SkillService discovers and loads local SKILL.md files from <workspace>/.agents/skills and ~/.vela/skills. */
+/** SkillService discovers, inspects, and loads local SKILL.md files according to SkillConfig. */
 export const SkillService = {
-  /** ListSkills scans project and user skill directories (one level deep) and returns metadata plus a digest. */
-  listSkills(workdir: string): Promise<SkillCatalog> {
-    return call("SkillService.ListSkills", workdir);
+  /**
+   * InspectSkills returns a directory-by-directory breakdown of all discovered skills,
+   * including shadowed/overridden and disabled entries, for management in Settings.
+   */
+  inspectSkills(workdir: string, cfg: SkillConfig | null): Promise<SkillInspection> {
+    return call("SkillService.InspectSkills", workdir, cfg);
   },
-  /** ReadSkill loads the full markdown body of a skill by name. */
-  readSkill(name: string, workdir: string): Promise<SkillDocument> {
-    return call("SkillService.ReadSkill", name, workdir);
+  /**
+   * ListSkills scans configured project and user skill directories in priority order,
+   * returning enabled skills and a stable digest.
+   */
+  listSkills(workdir: string, cfg: SkillConfig | null): Promise<SkillCatalog> {
+    return call("SkillService.ListSkills", workdir, cfg);
+  },
+  /** ReadSkill loads the full markdown body of an enabled skill by name. */
+  readSkill(name: string, workdir: string, cfg: SkillConfig | null): Promise<SkillDocument> {
+    return call("SkillService.ReadSkill", name, workdir, cfg);
   },
 } as const;
 

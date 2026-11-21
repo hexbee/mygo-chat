@@ -56,6 +56,7 @@ type ToolExecuteRequest struct {
 	Approved          bool           `json:"approved"`                    // True only after user approval; backend still re-verifies
 	AllowSession      bool           `json:"allowSession,omitempty"`      // When true with Approved, remembers non-high-risk command prefix for this session
 	ApprovalBlacklist []string       `json:"approvalBlacklist,omitempty"` // User-configured command blacklist for sandboxed workspace-write mode (nil uses defaults)
+	SkillConfig       *SkillConfig   `json:"skillConfig,omitempty"`       // User-configured skill directories, priority order, and disabled skills
 }
 
 // ToolExecuteResult separates concise model output from rich UI metadata.

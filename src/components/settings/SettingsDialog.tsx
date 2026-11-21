@@ -34,6 +34,7 @@ import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
 import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
 import { CommandBlacklistSetting } from './CommandBlacklistSetting.js'
+import { SkillsSetting } from './SkillsSetting.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import { nativeOpenFile, nativeSaveFile } from '../../services/desktop/dialog.js'
 import { AppService } from '../../mygo.js'
@@ -41,7 +42,7 @@ import { useUpdateStore } from '../../services/updater/updateStore.js'
 import styles from './Settings.module.css'
 
 /**
- * 设置弹窗：分「通用设置」（主题、语言、朗读音色、位置）、「安全与审批」（命令审批黑名单）与「数据管理」（API Key、导入、导出、删除）。
+ * 设置弹窗：分「通用设置」、「安全与审批」、「Skills」与「数据管理」。
  * 桌面端为居中弹窗、左侧导航；移动端为底部弹层、导航横排在内容上方
  */
 export const SettingsDialog = () => {
@@ -62,6 +63,20 @@ const sections: { value: SettingsSection; label: TranslationKey; icon: ReactNode
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <path
           d="M8 1.75L2.75 3.75V7.75C2.75 11.05 4.98 13.87 8 14.75C11.02 13.87 13.25 11.05 13.25 7.75V3.75L8 1.75Z"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    value: 'skills',
+    label: 'settingDialogAsideSkillsOptionLabel',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path
+          d="M8 2L9.7 5.8L13.8 6.3L10.7 9.1L11.6 13.2L8 11.1L4.4 13.2L5.3 9.1L2.2 6.3L6.3 5.8L8 2Z"
           stroke="currentColor"
           strokeWidth="1.3"
           strokeLinejoin="round"
@@ -122,6 +137,8 @@ const SettingsContent = () => {
             </>
           ) : section === 'security' ? (
             <CommandBlacklistSetting />
+          ) : section === 'skills' ? (
+            <SkillsSetting />
           ) : (
             <>
               <ApiKeyField editor={apiKeyEditor} />
