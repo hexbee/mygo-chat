@@ -31,7 +31,7 @@
 | **内置文件工具集** | `packages/fs/tool-fs`<br>`packages/fs/tool-fs-search`<br>`packages/fs/fs-observation-policy` | **部分复刻 + Go 原生实现** | 复刻 `read`/`write`/`edit` 参数与有界截断信封；`glob`/`grep` 用 Go 原生遍历+正则实现（不打包 `rg` 二进制）；**新增** Vela 独有的回收站式 `delete_file`；暂缓 `apply_patch` 与 `spill` |
 | **Bash / CLI 命令执行** | `packages/shell/tool-bash`<br>`packages/subprocess`<br>`packages/sandbox/sandbox-local` | **部分复刻 + 安全增强** | 复刻环境变量清洗、非零退出码作正常结果返回、二期超时转后台 Job 与 macOS `sandbox-exec`；**新增**面向普通用户的「严格只读白名单自动放行 + 写/删命令一次性审批」分级策略 |
 | **Skills 渐进式加载** | `packages/skill/skill-filesystem`<br>`packages/skill/tool-skill` | **部分复刻** | 复刻 `SKILL.md` YAML frontmatter、摘要目录 `<system-reminder>` 注入、`skill` 工具按需读全文与 `/name` 用户显式触发；只扫 `<workspace>/.agents/skills` 与 `~/.vela/skills` |
-| **MCP 客户端** | `packages/mcp/mcp-client`<br>`packages/mcp/mcp-manager` | **架构参考（Go 原生）** | 借鉴 `mcp__<serverName>__<rawName>` 稳定命名、`stdio` 环境清洗、`on-demand` 按需加载与 `probe` 探测；用 Go 原生实现 `stdio` + `streamable-http`，暂缓 OAuth 动态注册 |
+| **MCP 客户端** | `packages/mcp/mcp-client`<br>`packages/mcp/mcp-manager` | **部分复刻 + 架构参考 + 另行实现** | **复刻** `mcp__<serverName>__<rawName>` 命名、`on-demand` 按需加载、`stdio` 环境清洗、无副作用 `probe` 与指数退避重连；**参考**双层连接/编队管理但去 Cordis 化；**另行实现**基于官方 `modelcontextprotocol/go-sdk` 的 Go 桥接、`streamable-http` 优先策略（含静态 `headers` 鉴权）与 `stdio` 登录 Shell `PATH` 探测 / `npx`·`uvx` 缺失明确提示；暂缓 OAuth、独立 `mcp-resources` 与插件动态注册（详见 6.3 节） |
 
 ---
 
@@ -142,8 +142,33 @@ Vela 对接的 DeepSeek `/anthropic/v1/messages` 协议已预留 `ToolUseBlock`�
   - 扫描 `<workspace>/.agents/skills` 与 `~/.vela/skills` 一层目录（`<name>/SKILL.md` 或 `<name>.md`），解析 YAML frontmatter（`name`、`description`）。
   - 摘要目录按 digest 增量注入 `<system-reminder>`；模型调用 `skill(name)` 按需加载全文；输入框支持 `/name` 显式注入。
 - **MCP Client（Phase 3）**：
-  - Go 原生实现 `stdio`（带环境变量清洗）与 `streamable-http` 客户端，支持配置探测（`probe`）与指数退避重连。
-  - 工具统一命名为 `mcp__<serverName>__<rawName>`（调用时还原 `rawName`）；支持 `on-demand` 按需加载模式（仅暴露目录摘要 + `load_tools` 省 Token）。
+  - **传输优先级与本地运行时策略（不破零依赖红线）**：
+    - **优先支持 `streamable-http`**：面向普通用户零本地环境门槛，支持自定义静态 `headers`（如 `Authorization: Bearer ...`、`X-API-Key`），覆盖主流托管 MCP 服务。
+    - **同时支持 `stdio`（不捆绑 Node/Python）**：面向本机已有环境的开发者，直接兼容本机已安装的 `npx`、`uvx` 或 Go/Rust 单二进制 MCP Server。启动与 `probe` 前先补齐用户登录 Shell 的 `PATH`（规避 macOS/Linux GUI 应用 `PATH` 缺失，同时允许填写命令绝对路径），并通过 `LookPath` 做前置预检——**未检测到 `npx` / `uvx` 等可执行文件时，明确区分于服务启动报错并向用户弹出清晰指引（提示安装 Node.js / uv、填写绝对路径或改用远程 `streamable-http`）**；本机已安装时自然直接支持。
+  - **针对 `deepseek-harness`（`packages/mcp/*`）的拆解边界**：
+    - **直接复刻（协议行为与契约语义对齐）**：
+      1. **稳定工具命名与冲突规则**（`mcp-client/src/tools.ts`）：公开工具名固定为 `mcp__<serverName>__<rawName>`，`serverName` 校验 `[A-Za-z0-9_-]{1,32}`；名称规范化有损时追加 12 位十六进制 SHA-256 哈希防碰撞；`tools/call` 始终传递原始 `rawName`；同作用域重名直接拒绝。
+      2. **`on-demand` 按需加载机制**（`mcp-client/src/tool-loading.ts`）：按需服务器默认不把全部 schema 注入工具列表，仅在系统提示词追加目录摘要（单条摘要限长如 `160` 字符），由模型调用 `mcp__<serverName>__load_tools` 按需把工具定义加入当前会话以省 Token。作用域对齐 DSH：**纯内存、按会话隔离**（前端 `store.ts` 维护 `Map<sessionId, Set<string>>`，新会话与重启/刷新恢复均从空集合开始，不落盘）；服务器重连同步新工具列表时自动与当前已加载集合求交集（保留仍提供的、移除已下线的）；若上游服务器自身提供名为 `load_tools` 的工具则跳过不列入目录并记录警告。
+      3. **`stdio` 敏感环境变量清洗**（`mcp-client/src/transport.ts`）：启动子进程前剥离父进程中匹配 `KEY|PASSWORD|SECRET|TOKEN` 的变量，再叠加上层显式配置的 `env`。
+      4. **连接容错与探测契约**（`mcp-client/src/connection.ts`、`probe.ts`）：一次性无副作用 `probe`（连接 → 读身份与工具列表 → 关闭，不注册工具）；指数退避重连（`500ms` 起翻倍至 `30s`、默认上限 `10` 次，持续正常连接满 `30s` 后重置计数以防闪退死循环；**但对 `stdio` 前置 `LookPath` 缺运行时、以及 `streamable-http` 明确的配置/鉴权致命错误如非法 URL、HTTP `401`/`403` 或首次建连握手返回 HTTP `404` 直接停在错误态、不消耗重试预算；运行中因远端重启导致旧 `Mcp-Session-Id` 失效返回的 `404` 则走会话重建/重连**）；工具同步在单一 `MCPService` 内加锁原子替换该服务器内存快照（拉取或校验失败保留旧快照）；默认单次调用超时 `60s`，且 MCP `isError` 如实作为工具错误返回模型。
+    - **架构参考（去 Cordis 化，纯 Go 轻量重构）**：
+      1. **双层管理职责**（参考 `mcp-client` 单实例监督 + `mcp-manager` 编队对账）：剥离 Cordis Fiber、`McpClientHost`、volatile Config 与 `dsh-api-remotes`，改用单一 Go `MCPService` + 串行操作队列管理实例增删改启停/重启/探测，状态变更经 `mygo.NewEvent` 推送前端。
+      2. **配置条目结构与服务器指令注入**（参考 `mcp-manager` 扁平 `servers.<name>` 与 `mcp-client/src/server-context.ts`）：沿用简洁扁平的逐服务器配置语义（`transport`、`url`/`headers`、`command`/`args`/`env`/`cwd`、`enabled`、`toolLoading`、`reconnect`），但落地为 Vela 轻量本地 JSON 配置而非 `cordis.yml`；非空白 `instructions` 按字面文本注入系统提示词并加字节上限（如 `32 KB`）。
+    - **Vela 另行实现**：
+      1. **基于官方 Go SDK 的协议与传输层**：不引入 `@modelcontextprotocol/sdk`（Node），直接接入官方 [`github.com/modelcontextprotocol/go-sdk/mcp`](https://github.com/modelcontextprotocol/go-sdk)（`v1.8.0+`，已完整支持至 `2026-07-28` 协议并与当前 `go 1.27.4` 兼容），无需手写 JSON-RPC 与传输帧解析；`stdio` 经 `mcp.CommandTransport` 注入清洗后的 `cmd.Env` 与解析后的 `PATH`，`streamable-http` 通过自定义 `http.Client` 注入静态 `headers`，编译进单一二进制且零外部运行时依赖。
+      2. **`streamable-http` 优先与 `stdio` 本机运行时预检**：按上述策略补齐 GUI 登录 Shell `PATH` 探测与 `npx`/`uvx` 缺失的友好提示（DSH 面向自带 Node 的部署环境，无此桌面端缺运行时引导需求）。
+      3. **三档权限与一次性审批接入**（DSH 未在 `mcp-client` 内置审批，交由外围插件钩子扩展；Vela 统一收口至 `ToolService.ClassifyToolCall`）：
+         - `mcp__<serverName>__load_tools`：本地只读元工具，三档权限下均自动放行。
+         - 外部 MCP 工具调用：**`仅可查看`** 仅放行工具定义中明确声明 `annotations.readOnlyHint === true` 的工具，其余 `deny`（未声明按非只读处理）；**`工作区内修改（默认）`** 对 `readOnlyHint === true` 自动放行，其余走一次性审批卡片（`ask`），同时在服务器高级选项中提供「信任此服务器（免审批）」开关（默认关闭）；**`完全权限`** 直接放行（`allow`）。注：`readOnlyHint` 为 MCP 服务端自声明提示（非协议强约束），自动放行隐含“仅接入可信 MCP 服务”的前提，添加服务器表单中需附简短风险提示。
+      4. **轻量凭据脱敏**：暂不引入 DSH 的 `credentials` 插件与 `${credential:REF}` 模板引擎，统一由本地 `~/.vela/mcp.json`（权限 `0600`）保存静态 Header Token，并在失败诊断与 `isError` 文本中对敏感凭据做 `[redacted]` 脱敏。
+    - **明确暂缓（不进 Phase 3 首发）**：`mcp-account` 与 OAuth 动态客户端注册/本地回调 WebServer、系统钥匙串凭据存储、独立 `mcp-resources` 资源工具包、第三方插件运行时注册（`mcpManager.register`）、PTC 图片附件投影与 MCP Prompts 模板。
+  - **设置页配置交互与持久化（`SettingsDialog` 新增 `MCP` 分组）**：
+    - **入口与布局**：在现有 `SettingsDialog`（`通用设置 / 安全与审批 / Skills / 数据管理`）左侧导航的 `Skills` 与 `数据管理` 之间新增 **`MCP`** 分组，延续 `SkillsSetting` 的顶部操作栏 + 卡片列表 + 启停开关视觉规范；顶部提供 **`+ 添加服务器`** 与 **`导入 JSON`** 两个入口。
+    - **双模式配置（表单默认 + JSON 进阶）**：
+      1. **可视化表单（默认）**：传输方式默认选中 `Streamable HTTP`（填写 `名称`、`URL` 与可选 `Headers` 键值对，敏感值遮罩显示）；切到 `Stdio` 时填写 `Command`、`Args`、可选 `Env` 与 `Cwd`，输入 `npx`/`uvx` 时实时走 Go 侧预检，未检测到运行时直接在表单内高亮提示（指引安装 Node.js / uv、填绝对路径或改用 HTTP MCP）；折叠「高级选项」提供加载模式（默认 `on-demand`、可切 `eager`）、调用超时、自动重连与「信任此服务器（工作区内修改模式免审批）」开关（默认关闭）。
+      2. **JSON 快速导入 / 编辑**：支持粘贴主流工具通用的 `{ "mcpServers": { ... } }` 片段，保存前统一经 Go 侧做 schema 与字段级校验并定位报错字段。
+    - **服务器卡片与状态操作**：每张卡片展示 `serverName`、类型徽章（`HTTP` / `Stdio`）、实时状态（已连接与工具数 / 连接中 / 已停用 / 缺运行时或错误详情）及启停开关；内置「测试连接（Probe）」「查看工具列表」「重启连接」「编辑 / 删除」操作。
+    - **配置存储与密钥隔离**：配置文件由 Go 侧统一落盘管理（如 `~/.vela/mcp.json`，权限 `0600`），**不存 `localStorage`、不随聊天历史 ZIP 导出**，防止静态 Header Token 随备份外泄。
 
 ---
 
@@ -153,7 +178,7 @@ Vela 对接的 DeepSeek `/anthropic/v1/messages` 协议已预留 `ToolUseBlock`�
 | :--- | :--- | :--- |
 | **Phase 1：最小 Agent 闭环** | 1. 开放 `deepseek-flash` / `deepseek-v4-pro` 模型与深度思考开关 UI<br>2. 侧边栏工作区分组 + 输入框工作区与三档权限下拉（对齐 DSH）<br>3. 前端 `tool_use` Agent Loop（含 `parseEvent.ts` 补齐与协议自愈）<br>4. Go 透明懒创建临时目录（含 `bash` 空目录回收与新增文件 diff）<br>5. 6 个文件工具 + 严格分级审批 `bash`<br>6. 工具调用卡片、Diff 预览、一次性审批卡片与基础「打开文件 / 访达定位」 | 挂载项目目录可自主读代码、改文件、跑测试；临时闲聊说「写个 HTML 小游戏」可自动落盘临时目录并一键打开试玩；跑 `go version` 零目录残留 |
 | **Phase 2：体验与安全跃迁** | 1. `bash` 超时自动转后台 Job（`job_output` / `job_kill`）<br>2. 产出文件「另存为」与增强预览卡片<br>3. macOS `sandbox-exec`（及 Linux `bwrap`）轻量 OS 沙箱<br>4. Skills 发现、按需加载工具与 `/` 快捷唤起 | 长耗时构建不中断；内核级兜底工作区外写入；支持项目与用户级 `SKILL.md` |
-| **Phase 3：生态扩展** | 1. Go 原生 MCP Client（`stdio` + `streamable-http` + `on-demand`）<br>2. 输入框 `@` 快速引用工作区文件<br>3. 视需求扩展多模型与自定义 Base URL | 可通过轻量配置接入外部 MCP 工具生态，同时保持 Vela 单文件极轻体积 |
+| **Phase 3：生态扩展** | 1. 基于官方 `go-sdk` 的 MCP Client（`streamable-http` 优先含静态 `headers` 鉴权 + `stdio` 兼容本机 `npx`/`uvx`/二进制与缺失明确提示 + `on-demand` 按需加载）及设置页 `MCP` 分组（表单 + JSON 导入 + Probe 探测）<br>2. 输入框 `@` 快速引用工作区文件<br>3. 视需求扩展多模型与自定义 Base URL | 普通用户在设置页填远程 HTTP MCP URL 零环境门槛即可测试并启用；本机有 `npx`/`uvx` 的开发者可表单或粘贴 `mcpServers` JSON 无缝用 `stdio`，缺失运行时有明确引导提示；全程保持 Vela 单文件极轻体积 |
 
 ---
 
