@@ -406,9 +406,7 @@ func TestReadFilePreviewKinds(t *testing.T) {
 }
 
 func TestSandboxedAutoAllowAndSessionApproval(t *testing.T) {
-	origSandbox := osSandboxAvailableFn
-	osSandboxAvailableFn = func() bool { return true }
-	defer func() { osSandboxAvailableFn = origSandbox }()
+	withOSSandboxAvailable(t, true)
 
 	ts := &ToolService{}
 	wsDir, _ := setupTestWorkspace(t)

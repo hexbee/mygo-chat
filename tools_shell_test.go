@@ -8,10 +8,23 @@ import (
 	"time"
 )
 
+// withOSSandboxAvailable overrides the package-level OS sandbox probe for a test
+// and restores it on cleanup. Tests in this package must not call t.Parallel()
+// while mutating osSandboxAvailableFn.
+func withOSSandboxAvailable(t *testing.T, available bool) {
+	t.Helper()
+	orig := osSandboxAvailableFn
+	osSandboxAvailableFn = func() bool { return available }
+	t.Cleanup(func() { osSandboxAvailableFn = orig })
+}
+
+func withOSSandboxDisabled(t *testing.T) {
+	t.Helper()
+	withOSSandboxAvailable(t, false)
+}
+
 func TestBashStrictReadOnlyAllowlist(t *testing.T) {
-	origSandbox := osSandboxAvailableFn
-	osSandboxAvailableFn = func() bool { return false }
-	defer func() { osSandboxAvailableFn = origSandbox }()
+	withOSSandboxDisabled(t)
 
 	ts := &ToolService{}
 	wsDir, _ := setupTestWorkspace(t)
@@ -93,6 +106,8 @@ func TestBashStrictReadOnlyAllowlist(t *testing.T) {
 }
 
 func TestBashBackendFailClosedAndEnvSanitize(t *testing.T) {
+	withOSSandboxDisabled(t)
+
 	ts := &ToolService{}
 	wsDir, _ := setupTestWorkspace(t)
 
