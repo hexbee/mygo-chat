@@ -160,6 +160,13 @@ export interface UpdateState {
   error: string;
 }
 
+/** WorkspaceFileCandidate represents a file or directory match for @ mention autocomplete. */
+export interface WorkspaceFileCandidate {
+  path: string;
+  /** "directory" | "file" */
+  kind: string;
+}
+
 // ---- Services ----
 
 /** AppService provides basic desktop metadata and native bridge */
@@ -219,6 +226,14 @@ export const WorkspaceService = {
    */
   savePathAs(absPath: string): Promise<string> {
     return call("WorkspaceService.SavePathAs", absPath);
+  },
+  /**
+   * SearchWorkspaceFiles searches files and directories under workdir for @ file mentions.
+   * When query is empty or contains "/", it lists direct entries of the targeted directory;
+   * otherwise it performs a ranked fuzzy search across the workspace.
+   */
+  searchWorkspaceFiles(workdir: string, query: string, maxResults: number): Promise<WorkspaceFileCandidate[]> {
+    return call("WorkspaceService.SearchWorkspaceFiles", workdir, query, maxResults);
   },
 } as const;
 

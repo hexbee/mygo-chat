@@ -103,6 +103,36 @@
   letter-spacing: -0.01em;
 }
 
+.fileToken {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 3px 0 1px;
+  color: var(--dsw-alias-brand-text);
+  font-size: 15px;
+  line-height: 22px;
+  vertical-align: baseline;
+}
+
+.fileIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  color: var(--dsw-alias-brand-text);
+
+  svg {
+    display: block;
+    width: 15px;
+    height: 15px;
+  }
+}
+
+.fileLabel {
+  color: var(--dsw-alias-brand-text);
+}
+
 @media not all and (min-width: 440px) {
   .bubble {
     max-width: calc(100% - 68px);

@@ -8,6 +8,7 @@ import { stopReadAloud } from '../../services/speech/readAloud.js'
 import type { UserMessage as UserMessageType } from '../../services/chat/types.js'
 import { Button } from '../base/Button.js'
 import { IconButton } from '../base/IconButton.js'
+import { FileMentionIcon, FolderMentionIcon } from '../chatInput/AtFileMenu.js'
 import { formatQuoteDisplay } from '../chatInput/quoteEditor.js'
 import { ensureApiKey } from '../settings/settingsDialogState.js'
 import {
@@ -171,6 +172,19 @@ export const UserMessage = memo(function UserMessage({
                           {segment.kind === 'command' ? <CommandBadgeIcon /> : <SkillBadgeIcon />}
                         </span>
                         <span className={styles.skillLabel}>{segment.name}</span>
+                      </span>
+                    ) : segment.type === 'file' ? (
+                      <span key={index} className={styles.fileToken} title={segment.path}>
+                        <span className={styles.fileIcon} aria-hidden="true">
+                          {segment.kind === 'directory' ? (
+                            <FolderMentionIcon />
+                          ) : (
+                            <FileMentionIcon />
+                          )}
+                        </span>
+                        <span className={styles.fileLabel}>
+                          {segment.kind === 'directory' ? `${segment.name}/` : segment.name}
+                        </span>
                       </span>
                     ) : (
                       <span key={index}>{segment.text}</span>

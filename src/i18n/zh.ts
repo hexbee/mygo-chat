@@ -299,4 +299,9 @@ export const zh = {
   settingsSkillsMoveUp: '上移提高优先级',
   settingsSkillsMoveDown: '下移降低优先级',
   settingsSkillsOverriddenBy: '被 {dir} 覆盖',
+  atFileMenuSectionTitle: '文件与文件夹',
+  atFileMenuCrumbRoot: '工作区',
+  atFileMenuDrillHint: '进入目录',
+  atFileMenuDrillKey: 'Tab',
+  atFileMenuNoWorkspace: '请先选择工作区以引用文件',
 } as const

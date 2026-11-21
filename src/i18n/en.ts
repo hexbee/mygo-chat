@@ -308,4 +308,9 @@ export const en = {
   settingsSkillsMoveUp: 'Move up (higher priority)',
   settingsSkillsMoveDown: 'Move down (lower priority)',
   settingsSkillsOverriddenBy: 'Overridden by {dir}',
+  atFileMenuSectionTitle: 'Files & Folders',
+  atFileMenuCrumbRoot: 'Workspace',
+  atFileMenuDrillHint: 'Open folder',
+  atFileMenuDrillKey: 'Tab',
+  atFileMenuNoWorkspace: 'Select a workspace to mention files',
 } satisfies Record<keyof typeof zh, string>

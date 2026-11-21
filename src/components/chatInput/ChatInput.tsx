@@ -36,6 +36,8 @@ import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
 import { refreshSkills, useSkillStore } from '../../services/skills/store.js'
 import { useWorkspaceStore } from '../../services/workspace/store.js'
+import { WorkspaceService, type WorkspaceFileCandidate } from '../../mygo.js'
+import { AtFileMenu, type AtBreadcrumbItem } from './AtFileMenu.js'
 import { ModelPicker } from './ModelPicker.js'
 import { PermissionPicker } from './PermissionPicker.js'
 import {
@@ -45,6 +47,7 @@ import {
 } from './SlashSkillMenu.js'
 import { WorkspacePicker } from './WorkspacePicker.js'
 import {
+  getAtMatchAtCaret,
   getSlashMatchAtCaret,
   handleAtomicQuoteDeletion,
   handleHorizontalTokenNavigation,
@@ -57,7 +60,10 @@ import {
   placeCaretBeforeLeadingTokenIfClicked,
   removeQuoteToken,
   renderEditorSegments,
+  replaceAtQueryText,
+  replaceAtWithFileToken,
   replaceSlashWithSkillToken,
+  type AtCaretMatch,
   type SlashCaretMatch,
 } from './quoteEditor.js'
 import { useTranslate } from '../../i18n/index.js'
@@ -73,6 +79,10 @@ const QUOTE_CLASSES = {
   skillIcon: styles.skillIcon,
   skillGlyph: styles.skillGlyph,
   skillLabel: styles.skillLabel,
+  fileToken: styles.fileToken,
+  fileIcon: styles.fileIcon,
+  fileGlyph: styles.fileGlyph,
+  fileLabel: styles.fileLabel,
 }
 
 /** 输入框：自适应高度的富文本输入框（支持内联多引用） + 文件 + 深度思考与智能搜索开关 + 语音输入 + 发送 / 停止 */
@@ -106,6 +116,12 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const [slashMatch, setSlashMatch] = useState<SlashCaretMatch | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
   const [slashDismissed, setSlashDismissed] = useState(false)
+  const [atMatch, setAtMatch] = useState<AtCaretMatch | null>(null)
+  const [atIndex, setAtIndex] = useState(0)
+  const [atDismissed, setAtDismissed] = useState(false)
+  const [atDrilled, setAtDrilled] = useState(false)
+  const [atItems, setAtItems] = useState<WorkspaceFileCandidate[]>([])
+  const atReqIdRef = useRef(0)
   const skills = useSkillStore((state) => state.skills)
   const workspaces = useWorkspaceStore((state) => state.workspaces)
   const draftWorkspaceId = useWorkspaceStore((state) => state.draftWorkspaceId)
@@ -170,6 +186,59 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     setSlashIndex(0)
   }, [slashQuery])
 
+  const atQuery = atMatch ? atMatch.query : null
+  const atOpen = atQuery !== null && !atDismissed && slashQuery === null
+
+  useEffect(() => {
+    setAtDismissed(false)
+    setAtIndex(0)
+    if (atQuery === null || !atQuery.includes('/')) {
+      setAtDrilled(false)
+    }
+  }, [atQuery])
+
+  useEffect(() => {
+    if (!atOpen || !activeWorkdir || atQuery === null) {
+      setAtItems([])
+      return
+    }
+    const reqId = ++atReqIdRef.current
+    void WorkspaceService.searchWorkspaceFiles(activeWorkdir, atQuery, 30)
+      .then((items) => {
+        if (atReqIdRef.current === reqId) {
+          setAtItems(items ?? [])
+        }
+      })
+      .catch(() => {
+        if (atReqIdRef.current === reqId) {
+          setAtItems([])
+        }
+      })
+  }, [atOpen, activeWorkdir, atQuery])
+
+  const atCrumbs = useMemo<AtBreadcrumbItem[]>(() => {
+    if (!atOpen || !atDrilled || !atQuery) {
+      return []
+    }
+    const slash = atQuery.lastIndexOf('/')
+    if (slash < 0) {
+      return []
+    }
+    const parts = atQuery.slice(0, slash).split('/').filter(Boolean)
+    if (parts.length === 0) {
+      return []
+    }
+    const crumbs: AtBreadcrumbItem[] = [{ label: t('atFileMenuCrumbRoot'), path: '' }]
+    for (let i = 0; i < parts.length; i++) {
+      crumbs.push({
+        label: parts[i],
+        path: `${parts.slice(0, i + 1).join('/')}/`,
+        current: i === parts.length - 1,
+      })
+    }
+    return crumbs
+  }, [atOpen, atDrilled, atQuery, t])
+
   const syncFromDom = useCallback(() => {
     const editor = editorRef.current
     if (!editor) {
@@ -179,6 +248,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     lastSyncedSegmentsRef.current = nextSegments
     setDraftSegments(sessionId, nextSegments)
     setSlashMatch(getSlashMatchAtCaret(editor))
+    setAtMatch(getAtMatchAtCaret(editor))
   }, [sessionId])
 
   const selectSlashItem = useCallback(
@@ -212,6 +282,77 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     [sessionId, slashMatch, syncFromDom]
   )
 
+  const selectAtItem = useCallback(
+    (item: WorkspaceFileCandidate) => {
+      const editor = editorRef.current
+      if (!editor) {
+        return
+      }
+      const slash = item.path.lastIndexOf('/')
+      const name = slash < 0 ? item.path : item.path.slice(slash + 1)
+      const kind = item.kind === 'directory' ? 'directory' : 'file'
+      const liveMatch = atMatch ?? getAtMatchAtCaret(editor)
+      setAtDismissed(true)
+      setAtMatch(null)
+      setAtDrilled(false)
+      if (liveMatch) {
+        savedRangeRef.current = replaceAtWithFileToken(
+          editor,
+          liveMatch,
+          createId(),
+          item.path,
+          name,
+          kind,
+          QUOTE_CLASSES
+        )
+        syncFromDom()
+      } else {
+        setDraftSegments(sessionId, [
+          { type: 'file', id: createId(), path: item.path, name, kind },
+          { type: 'text', text: ' ' },
+        ])
+      }
+    },
+    [atMatch, sessionId, syncFromDom]
+  )
+
+  const drillAtDirectory = useCallback(
+    (item: WorkspaceFileCandidate) => {
+      const editor = editorRef.current
+      if (!editor || item.kind !== 'directory') {
+        return
+      }
+      const liveMatch = atMatch ?? getAtMatchAtCaret(editor)
+      if (!liveMatch) {
+        return
+      }
+      const nextQuery = item.path.endsWith('/') ? item.path : `${item.path}/`
+      setAtDrilled(true)
+      setAtIndex(0)
+      savedRangeRef.current = replaceAtQueryText(editor, liveMatch, nextQuery)
+      syncFromDom()
+    },
+    [atMatch, syncFromDom]
+  )
+
+  const navigateAtCrumb = useCallback(
+    (dirPath: string) => {
+      const editor = editorRef.current
+      if (!editor) {
+        return
+      }
+      const liveMatch = atMatch ?? getAtMatchAtCaret(editor)
+      if (!liveMatch) {
+        return
+      }
+      setAtDrilled(dirPath.length > 0)
+      setAtIndex(0)
+      savedRangeRef.current = replaceAtQueryText(editor, liveMatch, dirPath)
+      syncFromDom()
+    },
+    [atMatch, syncFromDom]
+  )
+
   const getUserMessagesHistory = useCallback((): DraftSegment[][] => {
     if (!sessionId) {
       return []
@@ -231,7 +372,15 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
                 ? { type: 'quote', id: createId(), text: segment.text }
                 : segment.type === 'skill'
                   ? { type: 'skill', id: createId(), name: segment.name, kind: segment.kind }
-                  : { type: 'text', text: segment.text }
+                  : segment.type === 'file'
+                    ? {
+                        type: 'file',
+                        id: createId(),
+                        path: segment.path,
+                        name: segment.name,
+                        kind: segment.kind,
+                      }
+                    : { type: 'text', text: segment.text }
             )
           )
         } else {
@@ -273,6 +422,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       if (editor.contains(range.startContainer) && editor.contains(range.endContainer)) {
         savedRangeRef.current = range.cloneRange()
         setSlashMatch(getSlashMatchAtCaret(editor))
+        setAtMatch(getAtMatchAtCaret(editor))
       }
     }
     document.addEventListener('selectionchange', onSelectionChange)
@@ -414,6 +564,17 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         onSelect={selectSlashItem}
         onHover={setSlashIndex}
       />
+      <AtFileMenu
+        open={atOpen}
+        items={atItems}
+        crumbs={atCrumbs}
+        selectedIndex={Math.min(atIndex, Math.max(0, atItems.length - 1))}
+        hasWorkspace={Boolean(activeWorkdir)}
+        onSelect={selectAtItem}
+        onDrill={drillAtDirectory}
+        onCrumb={navigateAtCrumb}
+        onHover={setAtIndex}
+      />
       <WorkspacePicker sessionId={sessionId} disabled={importingHistory} />
       <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
       <div className={styles.textareaWrapper}>
@@ -464,6 +625,19 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             )
             if (removeSkillBtn && editorRef.current) {
               const token = removeSkillBtn.closest<HTMLElement>('[data-skill-id]')
+              if (token) {
+                event.preventDefault()
+                historyIndexRef.current = -1
+                savedRangeRef.current = removeQuoteToken(editorRef.current, token)
+                syncFromDom()
+                return
+              }
+            }
+            const removeFileBtn = (event.target as Element | null)?.closest(
+              '[data-file-remove="true"]'
+            )
+            if (removeFileBtn && editorRef.current) {
+              const token = removeFileBtn.closest<HTMLElement>('[data-file-id]')
               if (token) {
                 event.preventDefault()
                 historyIndexRef.current = -1
@@ -549,6 +723,44 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
                 const chosen = slashItems[Math.min(slashIndex, slashItems.length - 1)]
                 if (chosen) {
                   selectSlashItem(chosen)
+                }
+                return
+              }
+            }
+
+            if (atOpen && atItems.length > 0) {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setAtIndex((prev) => (prev + 1) % atItems.length)
+                return
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setAtIndex((prev) => (prev - 1 + atItems.length) % atItems.length)
+                return
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setAtDismissed(true)
+                return
+              }
+              if (event.key === 'Tab') {
+                event.preventDefault()
+                const chosen = atItems[Math.min(atIndex, atItems.length - 1)]
+                if (chosen) {
+                  if (chosen.kind === 'directory') {
+                    drillAtDirectory(chosen)
+                  } else {
+                    selectAtItem(chosen)
+                  }
+                }
+                return
+              }
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                const chosen = atItems[Math.min(atIndex, atItems.length - 1)]
+                if (chosen) {
+                  selectAtItem(chosen)
                 }
                 return
               }

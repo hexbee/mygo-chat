@@ -38,6 +38,7 @@ export type UserMessageSegment =
   | { type: 'text'; text: string }
   | { type: 'quote'; text: string }
   | { type: 'skill'; name: string; kind?: 'skill' | 'command' }
+  | { type: 'file'; path: string; name: string; kind: 'file' | 'directory' }
 
 export type UserMessage = MessageBranch & {
   id: string

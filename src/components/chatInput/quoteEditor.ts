@@ -10,12 +10,23 @@ export type QuoteTokenClasses = {
   skillIcon: string
   skillGlyph: string
   skillLabel: string
+  fileToken: string
+  fileIcon: string
+  fileGlyph: string
+  fileLabel: string
 }
 
 export type SlashCaretMatch = {
   query: string
   textNode: Text
   slashOffset: number
+  endOffset: number
+}
+
+export type AtCaretMatch = {
+  query: string
+  textNode: Text
+  atOffset: number
   endOffset: number
 }
 
@@ -113,6 +124,53 @@ const createCommandIconSvg = (): SVGSVGElement => {
   slash.setAttribute('stroke-width', '1.3')
   slash.setAttribute('stroke-linecap', 'round')
   svg.appendChild(slash)
+  return svg
+}
+
+const createFileIconSvg = (): SVGSVGElement => {
+  const svg = document.createElementNS(SVG_NS, 'svg')
+  svg.setAttribute('width', '15')
+  svg.setAttribute('height', '15')
+  svg.setAttribute('viewBox', '0 0 16 16')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('aria-hidden', 'true')
+
+  const rect = document.createElementNS(SVG_NS, 'rect')
+  rect.setAttribute('x', '2.4')
+  rect.setAttribute('y', '2.4')
+  rect.setAttribute('width', '11.2')
+  rect.setAttribute('height', '11.2')
+  rect.setAttribute('rx', '2.2')
+  rect.setAttribute('stroke', 'currentColor')
+  rect.setAttribute('stroke-width', '1.3')
+  svg.appendChild(rect)
+
+  const lines = document.createElementNS(SVG_NS, 'path')
+  lines.setAttribute('d', 'M5.2 6.2H10.8M5.2 9.4H8.6')
+  lines.setAttribute('stroke', 'currentColor')
+  lines.setAttribute('stroke-width', '1.3')
+  lines.setAttribute('stroke-linecap', 'round')
+  svg.appendChild(lines)
+  return svg
+}
+
+const createFolderIconSvg = (): SVGSVGElement => {
+  const svg = document.createElementNS(SVG_NS, 'svg')
+  svg.setAttribute('width', '15')
+  svg.setAttribute('height', '15')
+  svg.setAttribute('viewBox', '0 0 16 16')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('aria-hidden', 'true')
+
+  const path = document.createElementNS(SVG_NS, 'path')
+  path.setAttribute(
+    'd',
+    'M2.2 4.3C2.2 3.47 2.87 2.8 3.7 2.8H6.15C6.57 2.8 6.97 2.98 7.25 3.3L8.05 4.2H12.3C13.13 4.2 13.8 4.87 13.8 5.7V11.7C13.8 12.53 13.13 13.2 12.3 13.2H3.7C2.87 13.2 2.2 12.53 2.2 11.7V4.3Z'
+  )
+  path.setAttribute('stroke', 'currentColor')
+  path.setAttribute('stroke-width', '1.3')
+  path.setAttribute('stroke-linejoin', 'round')
+  svg.appendChild(path)
   return svg
 }
 
@@ -214,7 +272,51 @@ export const createSkillTokenElement = (
   return token
 }
 
-/** 点击引用或技能胶囊上的叉叉删除该节点，同时保留其他已输入文字 */
+export const createFileTokenElement = (
+  id: string,
+  path: string,
+  name: string,
+  kind: 'file' | 'directory',
+  classes: QuoteTokenClasses
+): HTMLSpanElement => {
+  const token = document.createElement('span')
+  token.className = classes.fileToken
+  token.contentEditable = 'false'
+  token.dataset.fileId = id
+  token.dataset.filePath = path
+  token.dataset.fileName = name
+  token.dataset.fileKind = kind
+  token.title = path
+
+  const icon = document.createElement('span')
+  icon.className = classes.fileIcon
+  icon.dataset.fileRemove = 'true'
+  icon.setAttribute('role', 'button')
+  icon.setAttribute('aria-label', `Remove ${kind} ${path}`)
+
+  const fileGlyph = document.createElement('span')
+  fileGlyph.className = classes.fileGlyph
+  fileGlyph.setAttribute('aria-hidden', 'true')
+  fileGlyph.appendChild(kind === 'directory' ? createFolderIconSvg() : createFileIconSvg())
+
+  const removeGlyph = document.createElement('span')
+  removeGlyph.className = classes.removeGlyph
+  removeGlyph.setAttribute('aria-hidden', 'true')
+  removeGlyph.appendChild(createRemoveIconSvg())
+
+  icon.appendChild(fileGlyph)
+  icon.appendChild(removeGlyph)
+
+  const label = document.createElement('span')
+  label.className = classes.fileLabel
+  label.textContent = kind === 'directory' ? `${name}/` : name
+
+  token.appendChild(icon)
+  token.appendChild(label)
+  return token
+}
+
+/** 点击引用、技能或文件胶囊上的叉叉删除该节点，同时保留其他已输入文字 */
 export const removeQuoteToken = (root: HTMLElement, token: HTMLElement): Range | null => {
   if (!root.contains(token)) {
     return null
@@ -263,8 +365,11 @@ const isQuoteElement = (node: Node | null): boolean =>
 const isSkillElement = (node: Node | null): boolean =>
   node instanceof HTMLElement && typeof node.dataset.skillId === 'string'
 
+const isFileElement = (node: Node | null): boolean =>
+  node instanceof HTMLElement && typeof node.dataset.fileId === 'string'
+
 const isInlineTokenElement = (node: Node | null): node is HTMLElement =>
-  isQuoteElement(node) || isSkillElement(node)
+  isQuoteElement(node) || isSkillElement(node) || isFileElement(node)
 
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI'])
 
@@ -309,6 +414,16 @@ export const parseEditorSegments = (root: HTMLElement): DraftSegment[] => {
       }
       return
     }
+    if (isFileElement(node)) {
+      const id = node.dataset.fileId ?? ''
+      const path = node.dataset.filePath ?? ''
+      const name = node.dataset.fileName ?? ''
+      const kind = node.dataset.fileKind === 'directory' ? 'directory' : 'file'
+      if (path && name) {
+        segments.push({ type: 'file', id, path, name, kind })
+      }
+      return
+    }
     if (node.tagName === 'BR') {
       pushTextSegment(segments, '\n')
       return
@@ -342,7 +457,7 @@ export const renderEditorSegments = (
 ) => {
   root.replaceChildren()
   for (const segment of segments) {
-    if (segment.type === 'quote' || segment.type === 'skill') {
+    if (segment.type === 'quote' || segment.type === 'skill' || segment.type === 'file') {
       const prev = root.lastChild
       if (!prev || prev.nodeType !== Node.TEXT_NODE) {
         root.appendChild(document.createTextNode(CARET_ANCHOR))
@@ -350,7 +465,9 @@ export const renderEditorSegments = (
       root.appendChild(
         segment.type === 'quote'
           ? createQuoteTokenElement(segment.id, segment.text, classes)
-          : createSkillTokenElement(segment.id, segment.name, classes, segment.kind ?? 'skill')
+          : segment.type === 'skill'
+            ? createSkillTokenElement(segment.id, segment.name, classes, segment.kind ?? 'skill')
+            : createFileTokenElement(segment.id, segment.path, segment.name, segment.kind, classes)
       )
       continue
     }
@@ -452,6 +569,125 @@ export const replaceSlashWithSkillToken = (
   fragment.appendChild(trailingSpace)
 
   range.insertNode(fragment)
+  if (match.textNode.parentNode && match.textNode.nodeValue === '') {
+    match.textNode.parentNode.removeChild(match.textNode)
+  }
+
+  const nextRange = document.createRange()
+  nextRange.setStart(trailingSpace, trailingSpace.length)
+  nextRange.collapse(true)
+
+  root.focus({ preventScroll: true })
+  const selection = window.getSelection()
+  if (selection) {
+    selection.removeAllRanges()
+    selection.addRange(nextRange)
+  }
+  return nextRange.cloneRange()
+}
+
+/** 检测当前光标前是否正在输入 `@path-query`（支持句首与句中任意位置） */
+export const getAtMatchAtCaret = (root: HTMLElement): AtCaretMatch | null => {
+  const selection = window.getSelection()
+  if (!selection || !selection.isCollapsed || selection.rangeCount === 0) {
+    return null
+  }
+  const range = selection.getRangeAt(0)
+  if (!isRangeInsideRoot(range, root)) {
+    return null
+  }
+  let textNode: Text | null = null
+  let endOffset = 0
+  if (range.startContainer.nodeType === Node.TEXT_NODE) {
+    textNode = range.startContainer as Text
+    endOffset = range.startOffset
+  } else if (range.startContainer === root && range.startOffset > 0) {
+    const prev = root.childNodes[range.startOffset - 1]
+    if (prev?.nodeType === Node.TEXT_NODE) {
+      textNode = prev as Text
+      endOffset = (textNode.nodeValue ?? '').length
+    }
+  }
+  if (!textNode) {
+    return null
+  }
+  const before = (textNode.nodeValue ?? '').slice(0, endOffset)
+  const match = before.match(/(?:^|[\s\u200B])@([^\s\u200B]*)$/)
+  if (!match) {
+    return null
+  }
+  const query = match[1]
+  const atOffset = endOffset - query.length - 1
+  return {
+    query,
+    textNode,
+    atOffset,
+    endOffset,
+  }
+}
+
+/** 在目录 Tab 钻取或点击面包屑时，将 `@oldQuery` 原地替换为 `@nextQuery` 并保持光标在末尾 */
+export const replaceAtQueryText = (
+  root: HTMLElement,
+  match: AtCaretMatch,
+  nextQuery: string
+): Range | null => {
+  if (!root.contains(match.textNode)) {
+    return null
+  }
+  const value = match.textNode.nodeValue ?? ''
+  const replacement = `@${nextQuery}`
+  match.textNode.nodeValue =
+    value.slice(0, match.atOffset) + replacement + value.slice(match.endOffset)
+
+  const nextOffset = match.atOffset + replacement.length
+  const nextRange = document.createRange()
+  nextRange.setStart(match.textNode, nextOffset)
+  nextRange.collapse(true)
+
+  root.focus({ preventScroll: true })
+  const selection = window.getSelection()
+  if (selection) {
+    selection.removeAllRanges()
+    selection.addRange(nextRange)
+  }
+  return nextRange.cloneRange()
+}
+
+/** 将当前光标处的 `@query` 替换为内联文件/目录引用胶囊，并在其后插入空格 */
+export const replaceAtWithFileToken = (
+  root: HTMLElement,
+  match: AtCaretMatch,
+  id: string,
+  path: string,
+  name: string,
+  kind: 'file' | 'directory',
+  classes: QuoteTokenClasses
+): Range | null => {
+  if (!root.contains(match.textNode)) {
+    return null
+  }
+  const range = document.createRange()
+  range.setStart(match.textNode, match.atOffset)
+  range.setEnd(match.textNode, match.endOffset)
+  range.deleteContents()
+
+  const token = createFileTokenElement(id, path, name, kind, classes)
+  const trailingSpace = document.createTextNode(' ')
+  const fragment = document.createDocumentFragment()
+  if (
+    match.atOffset === 0 &&
+    (!match.textNode.previousSibling || match.textNode.previousSibling.nodeType !== Node.TEXT_NODE)
+  ) {
+    fragment.appendChild(document.createTextNode(CARET_ANCHOR))
+  }
+  fragment.appendChild(token)
+  fragment.appendChild(trailingSpace)
+
+  range.insertNode(fragment)
+  if (match.textNode.parentNode && match.textNode.nodeValue === '') {
+    match.textNode.parentNode.removeChild(match.textNode)
+  }
 
   const nextRange = document.createRange()
   nextRange.setStart(trailingSpace, trailingSpace.length)
@@ -636,6 +872,20 @@ const ensureTextSlotAfter = (token: HTMLElement): Text => {
   return anchor
 }
 
+const isEmptyOrAnchorText = (node: Node | null): boolean =>
+  node?.nodeType === Node.TEXT_NODE && stripCaretAnchors(node.nodeValue ?? '').length === 0
+
+const findSiblingInlineToken = (
+  start: Node | null,
+  direction: 'backward' | 'forward'
+): HTMLElement | null => {
+  let cursor = start
+  while (cursor && isEmptyOrAnchorText(cursor)) {
+    cursor = direction === 'backward' ? cursor.previousSibling : cursor.nextSibling
+  }
+  return isInlineTokenElement(cursor) ? cursor : null
+}
+
 const findAdjacentInlineToken = (
   root: HTMLElement,
   range: Range,
@@ -644,27 +894,23 @@ const findAdjacentInlineToken = (
   const { startContainer, startOffset } = range
   if (direction === 'backward') {
     if (startContainer === root && startOffset > 0) {
-      const prev = root.childNodes[startOffset - 1]
-      return isInlineTokenElement(prev) ? prev : null
+      return findSiblingInlineToken(root.childNodes[startOffset - 1] ?? null, 'backward')
     }
     if (startContainer.nodeType === Node.TEXT_NODE) {
       const before = stripCaretAnchors((startContainer.nodeValue ?? '').slice(0, startOffset))
       if (before.length === 0) {
-        const prev = startContainer.previousSibling
-        return isInlineTokenElement(prev) ? prev : null
+        return findSiblingInlineToken(startContainer.previousSibling, 'backward')
       }
     }
     return null
   }
   if (startContainer === root && startOffset < root.childNodes.length) {
-    const next = root.childNodes[startOffset]
-    return isInlineTokenElement(next) ? next : null
+    return findSiblingInlineToken(root.childNodes[startOffset] ?? null, 'forward')
   }
   if (startContainer.nodeType === Node.TEXT_NODE) {
     const after = stripCaretAnchors((startContainer.nodeValue ?? '').slice(startOffset))
     if (after.length === 0) {
-      const next = startContainer.nextSibling
-      return isInlineTokenElement(next) ? next : null
+      return findSiblingInlineToken(startContainer.nextSibling, 'forward')
     }
   }
   return null
@@ -739,8 +985,8 @@ export const placeCaretBeforeLeadingTokenIfClicked = (
 }
 
 /**
- * 在引用或技能胶囊紧邻处按 Backspace / Delete 时，整体删除该节点，
- * 避免不同浏览器对 contenteditable="false" 的删除行为不一致。
+ * 在引用、技能或文件胶囊紧邻处按 Backspace / Delete 时，整体删除该节点，
+ * 同时拦截 WebKit 删除胶囊后最后一个字符时把光标跳回句首的异常行为。
  */
 export const handleAtomicQuoteDeletion = (
   root: HTMLElement,
@@ -754,6 +1000,28 @@ export const handleAtomicQuoteDeletion = (
   if (!isRangeInsideRoot(range, root)) {
     return false
   }
+
+  // WebKit 在删掉紧跟 contenteditable="false" 胶囊后的最后一个字符（例如自动空格）时，
+  // 会错误地把光标跳到行首。手动删除该字符并保留零宽槽位可让光标稳稳停在胶囊右侧。
+  if (direction === 'backward' && range.startContainer.nodeType === Node.TEXT_NODE) {
+    const textNode = range.startContainer as Text
+    const value = textNode.nodeValue ?? ''
+    const beforeRaw = value.slice(0, range.startOffset)
+    const afterRaw = value.slice(range.startOffset)
+    if (
+      stripCaretAnchors(beforeRaw).length === 1 &&
+      findSiblingInlineToken(textNode.previousSibling, 'backward') !== null
+    ) {
+      textNode.nodeValue = `${CARET_ANCHOR}${afterRaw}`
+      const nextRange = document.createRange()
+      nextRange.setStart(textNode, CARET_ANCHOR.length)
+      nextRange.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(nextRange)
+      return true
+    }
+  }
+
   const target = findAdjacentInlineToken(root, range, direction)
   if (!target) {
     return false
@@ -765,11 +1033,20 @@ export const handleAtomicQuoteDeletion = (
       ? target.previousSibling
       : null
 
-  const nextRange = document.createRange()
-  nextRange.setStartBefore(prevAnchor ?? target)
-  nextRange.collapse(true)
+  const prevSibling = (prevAnchor ?? target).previousSibling
   target.remove()
   prevAnchor?.remove()
+
+  const nextRange = document.createRange()
+  if (prevSibling && isInlineTokenElement(prevSibling)) {
+    const slot = ensureTextSlotAfter(prevSibling)
+    nextRange.setStart(slot, slot.nodeValue === CARET_ANCHOR ? CARET_ANCHOR.length : 0)
+  } else if (prevSibling?.nodeType === Node.TEXT_NODE) {
+    nextRange.setStart(prevSibling, (prevSibling.nodeValue ?? '').length)
+  } else {
+    nextRange.setStart(root, 0)
+  }
+  nextRange.collapse(true)
   selection.removeAllRanges()
   selection.addRange(nextRange)
   return true
@@ -791,7 +1068,7 @@ export const isCaretAtStart = (root: HTMLElement): boolean => {
     return false
   }
   const fragment = probe.cloneContents()
-  return fragment.querySelector('[data-quote-id], [data-skill-id], br') === null
+  return fragment.querySelector('[data-quote-id], [data-skill-id], [data-file-id], br') === null
 }
 
 export const isCaretAtEnd = (root: HTMLElement): boolean => {
@@ -810,5 +1087,5 @@ export const isCaretAtEnd = (root: HTMLElement): boolean => {
     return false
   }
   const fragment = probe.cloneContents()
-  return fragment.querySelector('[data-quote-id], [data-skill-id], br') === null
+  return fragment.querySelector('[data-quote-id], [data-skill-id], [data-file-id], br') === null
 }

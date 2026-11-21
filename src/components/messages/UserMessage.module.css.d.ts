@@ -12,6 +12,9 @@ declare const styles: {
   readonly skillToken: string
   readonly skillIcon: string
   readonly skillLabel: string
+  readonly fileToken: string
+  readonly fileIcon: string
+  readonly fileLabel: string
   readonly bottom: string
   readonly alwaysShow: string
   readonly editor: string

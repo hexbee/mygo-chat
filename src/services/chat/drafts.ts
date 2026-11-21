@@ -23,6 +23,7 @@ export type DraftSegment =
   | { type: 'text'; text: string }
   | { type: 'quote'; id: string; text: string }
   | { type: 'skill'; id: string; name: string; kind?: 'skill' | 'command' }
+  | { type: 'file'; id: string; path: string; name: string; kind: 'file' | 'directory' }
 
 export type Draft = {
   text: string
@@ -57,6 +58,18 @@ export const serializeDraftSegments = (segments: DraftSegment[]): string => {
         result += ' '
       }
       result += `/${name}`
+      continue
+    }
+    if (segment.type === 'file') {
+      const rawPath = segment.path.trim()
+      if (!rawPath) {
+        continue
+      }
+      const formattedPath = segment.kind === 'directory' && !rawPath.endsWith('/') ? `${rawPath}/` : rawPath
+      if (result && !/\s$/.test(result)) {
+        result += ' '
+      }
+      result += /\s/.test(formattedPath) ? `@"${formattedPath}"` : `@${formattedPath}`
       continue
     }
     const quoted = segment.text.trim()
@@ -184,7 +197,11 @@ export const retryDraftAttachment = (
 }
 
 const toMessageSegments = (segments: DraftSegment[]): UserMessageSegment[] | undefined => {
-  if (!segments.some((segment) => segment.type === 'quote' || segment.type === 'skill')) {
+  if (
+    !segments.some(
+      (segment) => segment.type === 'quote' || segment.type === 'skill' || segment.type === 'file'
+    )
+  ) {
     return undefined
   }
   const normalized: UserMessageSegment[] = []
@@ -200,6 +217,14 @@ const toMessageSegments = (segments: DraftSegment[]): UserMessageSegment[] | und
       const name = segment.name.trim()
       if (name) {
         normalized.push({ type: 'skill', name, ...(segment.kind ? { kind: segment.kind } : {}) })
+      }
+      continue
+    }
+    if (segment.type === 'file') {
+      const path = segment.path.trim()
+      const name = segment.name.trim()
+      if (path && name) {
+        normalized.push({ type: 'file', path, name, kind: segment.kind })
       }
       continue
     }

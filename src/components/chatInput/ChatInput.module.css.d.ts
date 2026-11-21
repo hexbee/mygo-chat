@@ -23,6 +23,10 @@ declare const styles: {
   readonly skillIcon: string
   readonly skillGlyph: string
   readonly skillLabel: string
+  readonly fileToken: string
+  readonly fileIcon: string
+  readonly fileGlyph: string
+  readonly fileLabel: string
   readonly textareaHidden: string
   readonly functionRow: string
   readonly toggles: string
