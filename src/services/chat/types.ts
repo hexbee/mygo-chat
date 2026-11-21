@@ -89,6 +89,13 @@ export type ToolUIMeta = {
   truncated?: boolean
   approvalStatus?: ToolApprovalStatus
   approvalReason?: string
+  backgroundJobId?: string
+  jobStatus?: 'running' | 'completed' | 'killed'
+  sandboxed?: boolean
+  sandboxMode?: string
+  skillName?: string
+  skillScope?: string
+  skillPath?: string
 }
 
 /** 客户端工具调用块 */

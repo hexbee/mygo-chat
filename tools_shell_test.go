@@ -9,6 +9,10 @@ import (
 )
 
 func TestBashStrictReadOnlyAllowlist(t *testing.T) {
+	origSandbox := osSandboxAvailableFn
+	osSandboxAvailableFn = func() bool { return false }
+	defer func() { osSandboxAvailableFn = origSandbox }()
+
 	ts := &ToolService{}
 	wsDir, _ := setupTestWorkspace(t)
 

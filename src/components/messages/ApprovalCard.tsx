@@ -47,10 +47,19 @@ export const ApprovalCard = memo(function ApprovalCard({
         <button
           type="button"
           className={styles.allowBtn}
-          onClick={() => approveToolCall(approval.toolUseId)}
+          onClick={() => approveToolCall(approval.toolUseId, false)}
         >
           {t('toolApprovalAllowOnce')}
         </button>
+        {approval.sessionAllowKey ? (
+          <button
+            type="button"
+            className={styles.allowSessionBtn}
+            onClick={() => approveToolCall(approval.toolUseId, true)}
+          >
+            {t('toolApprovalAllowSession', { command: approval.sessionAllowKey })}
+          </button>
+        ) : null}
         <button
           type="button"
           className={styles.rejectBtn}

@@ -18,19 +18,25 @@ const (
 
 // ToolService exposes Go-native file and shell tools to the frontend via mygo.Bind.
 type ToolService struct {
-	mu      sync.Mutex
-	nextID  uint64
-	cancels map[string]map[uint64]context.CancelFunc
+	mu            sync.Mutex
+	nextID        uint64
+	cancels       map[string]map[uint64]context.CancelFunc
+	nextJobID     uint64
+	jobs          map[string]*backgroundJob
+	sessionAllows map[string]map[string]bool
 }
 
 var globalToolService = &ToolService{
-	cancels: make(map[string]map[uint64]context.CancelFunc),
+	cancels:       make(map[string]map[uint64]context.CancelFunc),
+	jobs:          make(map[string]*backgroundJob),
+	sessionAllows: make(map[string]map[string]bool),
 }
 
 // ToolClassifyResult represents the pre-execution policy decision for a tool call.
 type ToolClassifyResult struct {
-	Decision string `json:"decision"` // "allow" | "ask" | "deny"
-	Reason   string `json:"reason"`
+	Decision        string `json:"decision"`                  // "allow" | "ask" | "deny"
+	Reason          string `json:"reason"`
+	SessionAllowKey string `json:"sessionAllowKey,omitempty"` // Non-empty when UI may offer "Allow for this session"
 }
 
 // ToolFileDiff carries structured before/after text for UI diff rendering.
@@ -42,12 +48,14 @@ type ToolFileDiff struct {
 
 // ToolExecuteRequest is the unified RPC payload for classifying and executing a client tool.
 type ToolExecuteRequest struct {
-	SessionID      string         `json:"sessionId"`
-	ToolName       string         `json:"toolName"` // read | write | edit | delete_file | glob | grep | bash
-	Input          map[string]any `json:"input"`
-	Workdir        string         `json:"workdir"`        // User workspace or existing scratchDir; empty triggers lazy scratch on write/edit/bash
-	PermissionMode string         `json:"permissionMode"` // read-only | workspace-write | full-access
-	Approved       bool           `json:"approved"`       // True only after one-time user approval; backend still re-verifies
+	SessionID         string         `json:"sessionId"`
+	ToolName          string         `json:"toolName"` // read | write | edit | delete_file | glob | grep | bash | job_output | job_kill | skill
+	Input             map[string]any `json:"input"`
+	Workdir           string         `json:"workdir"`                     // User workspace or existing scratchDir; empty triggers lazy scratch on write/edit/bash
+	PermissionMode    string         `json:"permissionMode"`              // read-only | workspace-write | full-access
+	Approved          bool           `json:"approved"`                    // True only after user approval; backend still re-verifies
+	AllowSession      bool           `json:"allowSession,omitempty"`      // When true with Approved, remembers non-high-risk command prefix for this session
+	ApprovalBlacklist []string       `json:"approvalBlacklist,omitempty"` // User-configured command blacklist for sandboxed workspace-write mode (nil uses defaults)
 }
 
 // ToolExecuteResult separates concise model output from rich UI metadata.
@@ -145,7 +153,16 @@ func (s *ToolService) ClassifyToolCall(req ToolExecuteRequest) ToolClassifyResul
 	perm := normalizePermissionMode(req.PermissionMode)
 
 	if req.ToolName == "bash" {
-		return classifyBashToolCall(req, perm)
+		res := classifyBashToolCall(req, perm)
+		if perm == PermissionWorkspaceWrite && res.Decision == DecisionAsk && res.SessionAllowKey != "" {
+			if s.isSessionAllowed(req.SessionID, res.SessionAllowKey) {
+				return ToolClassifyResult{Decision: DecisionAllow}
+			}
+		}
+		return res
+	}
+	if req.ToolName == "job_output" || req.ToolName == "job_kill" || req.ToolName == "skill" {
+		return ToolClassifyResult{Decision: DecisionAllow}
 	}
 	if isReadFileTool(req.ToolName) || isWriteFileTool(req.ToolName) {
 		return classifyFileToolCall(req, perm)
@@ -183,6 +200,9 @@ func (s *ToolService) ExecuteTool(req ToolExecuteRequest) (ToolExecuteResult, er
 				IsError:      true,
 			}, fmt.Errorf("approval required: %s", classification.Reason)
 		}
+		if req.AllowSession && classification.SessionAllowKey != "" && normalizePermissionMode(req.PermissionMode) == PermissionWorkspaceWrite {
+			s.grantSessionAllow(req.SessionID, classification.SessionAllowKey)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -203,7 +223,13 @@ func (s *ToolService) ExecuteTool(req ToolExecuteRequest) (ToolExecuteResult, er
 	case "grep":
 		return executeGrep(ctx, req)
 	case "bash":
-		return executeBash(ctx, req)
+		return s.executeBash(ctx, req)
+	case "job_output":
+		return s.executeJobOutput(ctx, req)
+	case "job_kill":
+		return s.executeJobKill(req)
+	case "skill":
+		return executeSkill(req)
 	default:
 		return ToolExecuteResult{
 			ModelContent: fmt.Sprintf("Unsupported tool: %s", req.ToolName),
@@ -223,6 +249,48 @@ func (s *ToolService) CancelSessionTools(sessionID string) error {
 		cancel()
 	}
 	return nil
+}
+
+// GetDefaultApprovalBlacklist returns the built-in command blacklist used in sandboxed workspace-write mode.
+func (s *ToolService) GetDefaultApprovalBlacklist() []string {
+	out := make([]string, len(defaultSandboxApprovalBlacklist))
+	copy(out, defaultSandboxApprovalBlacklist)
+	return out
+}
+
+// ClearSessionApprovals revokes all in-memory session-scoped command approvals for sessionID.
+func (s *ToolService) ClearSessionApprovals(sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	delete(s.sessionAllows, sessionID)
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *ToolService) isSessionAllowed(sessionID, key string) bool {
+	if sessionID == "" || key == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionAllows[sessionID][key]
+}
+
+func (s *ToolService) grantSessionAllow(sessionID, key string) {
+	if sessionID == "" || key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionAllows == nil {
+		s.sessionAllows = make(map[string]map[string]bool)
+	}
+	if s.sessionAllows[sessionID] == nil {
+		s.sessionAllows[sessionID] = make(map[string]bool)
+	}
+	s.sessionAllows[sessionID][key] = true
 }
 
 func (s *ToolService) registerCancel(sessionID string, cancel context.CancelFunc) uint64 {

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 )
@@ -195,9 +196,31 @@ func classifyBashToolCall(req ToolExecuteRequest, perm string) ToolClassifyResul
 			Reason:   "command is not in the strict read-only allowlist",
 		}
 	case PermissionWorkspaceWrite:
+		// When OS sandbox (macOS sandbox-exec / Linux bwrap) is active, default-allow workspace commands
+		// and only prompt for commands matching the configurable approval blacklist.
+		if osSandboxAvailableFn() {
+			rules := req.ApprovalBlacklist
+			if rules == nil {
+				rules = defaultSandboxApprovalBlacklist
+			}
+			if matched, hit := matchApprovalBlacklist(cmdStr, rules); hit {
+				return ToolClassifyResult{
+					Decision: DecisionAsk,
+					Reason:   fmt.Sprintf("command matches approval blacklist (%s)", matched),
+				}
+			}
+			return ToolClassifyResult{Decision: DecisionAllow}
+		}
+		if isHighRiskCommand(cmdStr) || isExternalSideEffectCommand(cmdStr) {
+			return ToolClassifyResult{
+				Decision: DecisionAsk,
+				Reason:   "destructive or network command requires one-time approval",
+			}
+		}
 		return ToolClassifyResult{
-			Decision: DecisionAsk,
-			Reason:   "non-read-only command requires one-time approval",
+			Decision:        DecisionAsk,
+			Reason:          "non-read-only command requires approval",
+			SessionAllowKey: deriveSessionAllowKey(cmdStr),
 		}
 	case PermissionFullAccess:
 		if isHighRiskCommand(cmdStr) {
@@ -213,6 +236,756 @@ func classifyBashToolCall(req ToolExecuteRequest, perm string) ToolClassifyResul
 			Reason:   "command requires one-time approval",
 		}
 	}
+}
+
+// defaultSandboxApprovalBlacklist defines commands that require explicit one-time approval
+// even when OS-level sandbox-exec / bwrap is active in workspace-write mode.
+var defaultSandboxApprovalBlacklist = []string{
+	"rm",
+	"rmdir",
+	"sudo",
+	"su",
+	"mkfs",
+	"dd",
+	"chmod",
+	"chown",
+	"shutdown",
+	"reboot",
+	"halt",
+	"kill",
+	"killall",
+	"pkill",
+	"diskutil",
+	"format",
+	"git reset",
+	"git clean",
+	"git checkout",
+	"git restore",
+	"git rebase",
+	"git merge",
+	"git push",
+	"curl",
+	"wget",
+	"ssh",
+	"scp",
+	"rsync",
+	"nc",
+	"netcat",
+	"telnet",
+	"ftp",
+	"sftp",
+	"gh",
+	"aws",
+	"gcloud",
+	"az",
+	"twine",
+	"npm publish",
+	"pnpm publish",
+	"yarn publish",
+	"cargo publish",
+}
+
+// extractAllCommandSegments splits a shell command across &&, ||, ;, |, &, newlines, subshells (...),
+// and recursively extracts inner $(...) / `...` substitutions so blacklisted commands cannot hide inside.
+func extractAllCommandSegments(s string) []string {
+	var segs []string
+	var cur strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	flush := func() {
+		seg := strings.TrimSpace(cur.String())
+		cur.Reset()
+		if seg != "" {
+			segs = append(segs, seg)
+		}
+	}
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			cur.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if inSingle {
+			if c == '\'' {
+				inSingle = false
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		// Extract backtick command substitutions even inside double quotes.
+		if c == '`' {
+			end := i + 1
+			for end < len(s) && s[end] != '`' {
+				if s[end] == '\\' && end+1 < len(s) {
+					end++
+				}
+				end++
+			}
+			if end < len(s) {
+				inner := s[i+1 : end]
+				segs = append(segs, extractAllCommandSegments(inner)...)
+				i = end
+				continue
+			}
+		}
+		// Extract $(...) command substitutions even inside double quotes.
+		if c == '$' && i+1 < len(s) && s[i+1] == '(' {
+			depth := 1
+			end := i + 2
+			for end < len(s) && depth > 0 {
+				switch s[end] {
+				case '(':
+					depth++
+				case ')':
+					depth--
+				}
+				end++
+			}
+			if depth == 0 {
+				inner := s[i+2 : end-1]
+				segs = append(segs, extractAllCommandSegments(inner)...)
+				i = end - 1
+				continue
+			}
+		}
+		if inDouble {
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inDouble = false
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+			cur.WriteByte(c)
+		case '\'':
+			inSingle = true
+			cur.WriteByte(c)
+		case '"':
+			inDouble = true
+			cur.WriteByte(c)
+		case ';', '|', '&', '\n', '\r', '(', ')':
+			flush()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
+	return segs
+}
+
+// matchApprovalBlacklist checks whether any sub-command in cmdStr matches one of the configured rules.
+// Rules can be a single command name ("rm", "curl") or a command + subcommand prefix ("git push", "npm publish").
+func matchApprovalBlacklist(cmdStr string, rules []string) (string, bool) {
+	if len(rules) == 0 {
+		return "", false
+	}
+	type parsedRule struct {
+		raw  string
+		cmd  string
+		sub  string
+		more bool
+	}
+	parsed := make([]parsedRule, 0, len(rules))
+	for _, r := range rules {
+		trimmed := strings.TrimSpace(r)
+		if trimmed == "" {
+			continue
+		}
+		fields := strings.Fields(strings.ToLower(trimmed))
+		if len(fields) == 0 {
+			continue
+		}
+		pr := parsedRule{raw: trimmed, cmd: fields[0]}
+		if len(fields) >= 2 {
+			pr.sub = fields[1]
+			pr.more = len(fields) > 2
+		}
+		parsed = append(parsed, pr)
+	}
+	if len(parsed) == 0 {
+		return "", false
+	}
+
+	segments := extractAllCommandSegments(cmdStr)
+	for _, seg := range segments {
+		words, ok := splitShellWords(seg)
+		if !ok || len(words) == 0 {
+			// Fallback to whitespace split if a segment had partial quotes.
+			words = strings.Fields(seg)
+		}
+		// Skip leading inline env assignments (FOO=bar cmd ...) and wrapper keywords.
+		for len(words) > 0 && (strings.Contains(words[0], "=") || words[0] == "!" || words[0] == "time" || words[0] == "nohup" || words[0] == "exec" || words[0] == "command") {
+			words = words[1:]
+		}
+		if len(words) == 0 {
+			continue
+		}
+		cmd := strings.ToLower(filepath.Base(words[0]))
+		var sub string
+		for _, w := range words[1:] {
+			if !strings.HasPrefix(w, "-") {
+				sub = strings.ToLower(w)
+				break
+			}
+		}
+		segLower := strings.ToLower(seg)
+
+		for _, pr := range parsed {
+			if pr.more {
+				if strings.Contains(segLower, strings.ToLower(pr.raw)) {
+					return pr.raw, true
+				}
+				continue
+			}
+			if pr.sub == "" {
+				if cmd == pr.cmd {
+					// Exempt curl/wget calls that exclusively target local loopback addresses (localhost / 127.0.0.1 / [::1]).
+					if (cmd == "curl" || cmd == "wget") && isLoopbackOnlyHTTPCommand(cmd, words[1:]) {
+						continue
+					}
+					return pr.raw, true
+				}
+			} else {
+				if cmd == pr.cmd && (sub == pr.sub || (len(words) >= 2 && strings.ToLower(words[1]) == pr.sub)) {
+					return pr.raw, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+// isLoopbackOnlyHTTPCommand returns true only when a curl/wget invocation contains at least one
+// explicit URL argument, uses no indirect/proxy/config flags, and every URL targets localhost, 127.0.0.1, or ::1.
+func isLoopbackOnlyHTTPCommand(cmd string, args []string) bool {
+	var valueFlags map[string]bool
+	var forbiddenFlags map[string]bool
+	if cmd == "curl" {
+		valueFlags = map[string]bool{
+			"-o": true, "--output": true, "-w": true, "--write-out": true,
+			"-H": true, "--header": true, "-X": true, "--request": true,
+			"-d": true, "--data": true, "--data-raw": true, "--data-binary": true, "--data-urlencode": true,
+			"-F": true, "--form": true, "-u": true, "--user": true,
+			"-A": true, "--user-agent": true, "-e": true, "--referer": true,
+			"-b": true, "--cookie": true, "-c": true, "--cookie-jar": true,
+			"-m": true, "--max-time": true, "--connect-timeout": true,
+			"-T": true, "--upload-file": true, "--url": true,
+		}
+		forbiddenFlags = map[string]bool{
+			"-K": true, "--config": true, "-x": true, "--proxy": true,
+			"--socks4": true, "--socks5": true, "--socks5-hostname": true,
+			"--resolve": true, "--connect-to": true, "--next": true, "-:": true,
+		}
+	} else {
+		valueFlags = map[string]bool{
+			"-O": true, "--output-document": true, "--header": true, "--method": true,
+			"--body-data": true, "-T": true, "--timeout": true, "-t": true, "--tries": true,
+			"-U": true, "--user-agent": true, "-P": true, "--directory-prefix": true,
+		}
+		forbiddenFlags = map[string]bool{
+			"-i": true, "--input-file": true, "--config": true,
+		}
+	}
+
+	urlCount := 0
+	endOfFlags := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !endOfFlags && arg == "--" {
+			endOfFlags = true
+			continue
+		}
+		if !endOfFlags && strings.HasPrefix(arg, "-") && arg != "-" {
+			flagName := arg
+			hasEq := false
+			eqVal := ""
+			if eqIdx := strings.IndexByte(arg, '='); eqIdx > 0 {
+				flagName = arg[:eqIdx]
+				hasEq = true
+				eqVal = arg[eqIdx+1:]
+			}
+			if forbiddenFlags[flagName] {
+				return false
+			}
+			if flagName == "--url" {
+				target := eqVal
+				if !hasEq {
+					if i+1 >= len(args) {
+						return false
+					}
+					i++
+					target = args[i]
+				}
+				if !isLoopbackURL(target) {
+					return false
+				}
+				urlCount++
+				continue
+			}
+			if valueFlags[flagName] {
+				if !hasEq {
+					if i+1 >= len(args) {
+						return false
+					}
+					i++
+				}
+				continue
+			}
+			if !strings.HasPrefix(arg, "--") && len(arg) > 2 {
+				for idx := 1; idx < len(arg); idx++ {
+					short := "-" + string(arg[idx])
+					if forbiddenFlags[short] {
+						return false
+					}
+					if valueFlags[short] {
+						if idx == len(arg)-1 {
+							if i+1 >= len(args) {
+								return false
+							}
+							i++
+						}
+						break
+					}
+				}
+			}
+			continue
+		}
+
+		if !isLoopbackURL(arg) {
+			return false
+		}
+		urlCount++
+	}
+	return urlCount > 0
+}
+
+func isLoopbackURL(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false
+	}
+	if strings.ContainsAny(trimmed, "{}[]") && !strings.Contains(trimmed, "[::1]") {
+		return false
+	}
+	candidate := trimmed
+	if !strings.Contains(candidate, "://") {
+		candidate = "http://" + candidate
+	}
+	u, err := url.Parse(candidate)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+var externalSideEffectCommands = map[string]bool{
+	"curl":   true,
+	"wget":   true,
+	"ssh":    true,
+	"scp":    true,
+	"rsync":  true,
+	"nc":     true,
+	"netcat": true,
+	"telnet": true,
+	"ftp":    true,
+	"sftp":   true,
+	"gh":     true,
+	"aws":    true,
+	"gcloud": true,
+	"az":     true,
+	"twine":  true,
+}
+
+func isExternalSideEffectCommand(cmdStr string) bool {
+	words, ok := splitShellWords(cmdStr)
+	if !ok || len(words) == 0 {
+		return true
+	}
+	cmd := strings.ToLower(filepath.Base(words[0]))
+	if externalSideEffectCommands[cmd] {
+		return true
+	}
+	if cmd == "git" && len(words) >= 2 {
+		switch strings.ToLower(words[1]) {
+		case "push", "fetch", "pull", "clone", "reset", "clean", "checkout", "restore", "rebase", "merge":
+			return true
+		}
+	}
+	if (cmd == "npm" || cmd == "pnpm" || cmd == "yarn" || cmd == "cargo") && len(words) >= 2 {
+		if strings.ToLower(words[1]) == "publish" {
+			return true
+		}
+	}
+	return false
+}
+
+// stripStderrToStdout removes standalone unquoted "2>&1" stream merges (which never write to disk).
+func stripStderrToStdout(s string) string {
+	var b strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	for i := 0; i < len(s); {
+		c := s[i]
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			i++
+			continue
+		}
+		if inSingle {
+			if c == '\'' {
+				inSingle = false
+			}
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		if inDouble {
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inDouble = false
+			}
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		if c == '\'' {
+			inSingle = true
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		if c == '"' {
+			inDouble = true
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		if strings.HasPrefix(s[i:], "2>&1") {
+			prevOK := i == 0 || s[i-1] == ' ' || s[i-1] == '\t'
+			end := i + 4
+			nextOK := end == len(s) || s[end] == ' ' || s[end] == '\t' || s[end] == '|' || s[end] == ';' || s[end] == '&'
+			if prevOK && nextOK {
+				i = end
+				continue
+			}
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// splitTopLevelCommandSegments splits a command on unquoted "&&" or ";".
+// Returns (nil, false) on unterminated quotes, background "&", or "||".
+func splitTopLevelCommandSegments(s string) ([]string, bool) {
+	var segs []string
+	var cur strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	flush := func() bool {
+		seg := strings.TrimSpace(cur.String())
+		cur.Reset()
+		if seg == "" {
+			return false
+		}
+		segs = append(segs, seg)
+		return true
+	}
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			cur.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if inSingle {
+			if c == '\'' {
+				inSingle = false
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		if inDouble {
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inDouble = false
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+			cur.WriteByte(c)
+		case '\'':
+			inSingle = true
+			cur.WriteByte(c)
+		case '"':
+			inDouble = true
+			cur.WriteByte(c)
+		case ';':
+			if !flush() {
+				return nil, false
+			}
+		case '&':
+			if i+1 < len(s) && s[i+1] == '&' {
+				i++
+				if !flush() {
+					return nil, false
+				}
+			} else {
+				return nil, false
+			}
+		case '|':
+			if i+1 < len(s) && s[i+1] == '|' {
+				return nil, false
+			}
+			cur.WriteByte(c)
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if inSingle || inDouble || escaped {
+		return nil, false
+	}
+	if strings.TrimSpace(cur.String()) != "" {
+		flush()
+	}
+	if len(segs) == 0 {
+		return nil, false
+	}
+	return segs, true
+}
+
+// splitTopLevelPipes splits a single segment on unquoted "|".
+func splitTopLevelPipes(s string) ([]string, bool) {
+	var stages []string
+	var cur strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			cur.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if inSingle {
+			if c == '\'' {
+				inSingle = false
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		if inDouble {
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inDouble = false
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+			cur.WriteByte(c)
+		case '\'':
+			inSingle = true
+			cur.WriteByte(c)
+		case '"':
+			inDouble = true
+			cur.WriteByte(c)
+		case '|':
+			stage := strings.TrimSpace(cur.String())
+			cur.Reset()
+			if stage == "" {
+				return nil, false
+			}
+			stages = append(stages, stage)
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if inSingle || inDouble || escaped {
+		return nil, false
+	}
+	last := strings.TrimSpace(cur.String())
+	if last == "" {
+		return nil, false
+	}
+	stages = append(stages, last)
+	return stages, true
+}
+
+// isSandboxSafeWorkspaceCommand returns true for local build/test/lint/format commands,
+// read-only pipelines, and "&&" / ";" chains where every segment is individually safe
+// when OS-level sandbox-exec / bwrap restricts writes to the workspace.
+func isSandboxSafeWorkspaceCommand(cmdStr string) bool {
+	cleaned := stripStderrToStdout(cmdStr)
+	if cleaned == "" {
+		return false
+	}
+	// Reject file redirections, command substitution, and multi-line scripts.
+	for _, tok := range []string{">", "<", "\n", "\r", "$(", "`"} {
+		if strings.Contains(cleaned, tok) {
+			return false
+		}
+	}
+
+	segments, ok := splitTopLevelCommandSegments(cleaned)
+	if !ok {
+		return false
+	}
+	for _, seg := range segments {
+		if !isSandboxSafeSegment(seg) {
+			return false
+		}
+	}
+	return true
+}
+
+func isSandboxSafeSegment(seg string) bool {
+	stages, ok := splitTopLevelPipes(seg)
+	if !ok || len(stages) == 0 {
+		return false
+	}
+	if len(stages) == 1 {
+		return isStrictReadOnlyCommand(stages[0]) || isSandboxSafeDevCommand(stages[0])
+	}
+	// Pipeline: first stage may be a safe dev command or read-only command; all downstream stages must be strict read-only.
+	if !isStrictReadOnlyCommand(stages[0]) && !isSandboxSafeDevCommand(stages[0]) {
+		return false
+	}
+	for _, stage := range stages[1:] {
+		if !isStrictReadOnlyCommand(stage) {
+			return false
+		}
+	}
+	return true
+}
+
+func isSandboxSafeDevCommand(cmdStr string) bool {
+	if isHighRiskCommand(cmdStr) || isExternalSideEffectCommand(cmdStr) {
+		return false
+	}
+	words, ok := splitShellWords(cmdStr)
+	if !ok || len(words) == 0 || strings.Contains(words[0], "=") {
+		return false
+	}
+	cmd := strings.ToLower(filepath.Base(words[0]))
+	args := words[1:]
+
+	switch cmd {
+	case "go":
+		if len(args) == 0 {
+			return false
+		}
+		switch args[0] {
+		case "test", "build", "vet", "fmt", "generate":
+			return true
+		case "mod":
+			return len(args) >= 2 && (args[1] == "tidy" || args[1] == "verify")
+		default:
+			return false
+		}
+	case "gofmt":
+		return true
+	case "tsc", "oxlint", "oxfmt", "eslint", "prettier", "vitest", "jest", "rspack", "vite", "pytest", "ruff", "mypy", "flake8", "black":
+		return true
+	case "mygo":
+		if len(args) == 0 {
+			return false
+		}
+		switch args[0] {
+		case "generate", "vet", "doctor", "build", "check":
+			return true
+		case "native":
+			return len(args) >= 2 && (args[1] == "check" || args[1] == "build")
+		default:
+			return false
+		}
+	case "pnpm", "npm", "yarn":
+		if len(args) == 0 {
+			return false
+		}
+		switch args[0] {
+		case "test", "build", "lint", "type", "typecheck", "format", "check", "generate":
+			return true
+		case "run":
+			return len(args) >= 2 && !strings.Contains(strings.ToLower(args[1]), "publish") && !strings.Contains(strings.ToLower(args[1]), "deploy")
+		default:
+			return false
+		}
+	case "cargo":
+		if len(args) == 0 {
+			return false
+		}
+		switch args[0] {
+		case "test", "check", "build", "clippy", "fmt":
+			return true
+		default:
+			return false
+		}
+	case "make", "cmake":
+		return true
+	default:
+		return false
+	}
+}
+
+// deriveSessionAllowKey computes a concise command prefix key (e.g. "python3", "pnpm run")
+// for session-scoped approval. Returns "" for compound/unsafe commands so they remain one-time only.
+func deriveSessionAllowKey(cmdStr string) string {
+	for _, tok := range dangerousShellTokens {
+		if strings.Contains(cmdStr, tok) {
+			return ""
+		}
+	}
+	words, ok := splitShellWords(cmdStr)
+	if !ok || len(words) == 0 || strings.Contains(words[0], "=") {
+		return ""
+	}
+	cmd := strings.ToLower(filepath.Base(words[0]))
+	if powerShellWriteCmdlets[cmd] || highRiskCommands[cmd] || externalSideEffectCommands[cmd] {
+		return ""
+	}
+	if len(words) >= 2 && !strings.HasPrefix(words[1], "-") {
+		switch cmd {
+		case "git", "go", "npm", "pnpm", "yarn", "cargo", "mygo":
+			return cmd + " " + strings.ToLower(words[1])
+		}
+	}
+	return cmd
 }
 
 func isHighRiskCommand(cmdStr string) bool {
@@ -233,13 +1006,14 @@ func isHighRiskCommand(cmdStr string) bool {
 // isStrictReadOnlyCommand returns true ONLY for single, non-compound commands whose
 // subcommand and every flag are explicitly allowlisted as side-effect-free read-only operations.
 func isStrictReadOnlyCommand(cmdStr string) bool {
+	cleaned := stripStderrToStdout(cmdStr)
 	for _, tok := range dangerousShellTokens {
-		if strings.Contains(cmdStr, tok) {
+		if strings.Contains(cleaned, tok) {
 			return false
 		}
 	}
 
-	words, ok := splitShellWords(cmdStr)
+	words, ok := splitShellWords(cleaned)
 	if !ok || len(words) == 0 {
 		return false
 	}
@@ -273,10 +1047,10 @@ func isStrictReadOnlyCommand(cmdStr string) bool {
 	case "cat":
 		return allFlagsAllowed(args, map[string]bool{"-n": true, "-b": true, "-s": true}, nil)
 	case "head":
-		return allFlagsAllowed(args, nil, map[string]bool{"-n": true, "-c": true})
+		return isAllowedHeadTailArgs(args)
 	case "tail":
 		// Explicitly exclude -f / -F (follow) so read-only commands never block indefinitely.
-		return allFlagsAllowed(args, nil, map[string]bool{"-n": true, "-c": true})
+		return isAllowedHeadTailArgs(args)
 	case "wc":
 		return allFlagsAllowed(args, map[string]bool{"-l": true, "-w": true, "-c": true, "-m": true}, nil)
 	case "file":
@@ -313,6 +1087,18 @@ func isStrictReadOnlyCommand(cmdStr string) bool {
 	default:
 		return false
 	}
+}
+
+func isAllowedHeadTailArgs(args []string) bool {
+	filtered := make([]string, 0, len(args))
+	for _, arg := range args {
+		// Support POSIX shorthand like "tail -2" or "head -20".
+		if len(arg) >= 2 && arg[0] == '-' && isDigits(arg[1:]) {
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	return allFlagsAllowed(filtered, nil, map[string]bool{"-n": true, "-c": true})
 }
 
 func isAllowedLsArgs(args []string) bool {

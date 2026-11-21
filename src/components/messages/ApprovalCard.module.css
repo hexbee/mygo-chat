@@ -74,6 +74,7 @@
 .actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -90,6 +91,22 @@
 
   &:hover {
     opacity: 0.9;
+  }
+}
+
+.allowSessionBtn {
+  padding: 5px 12px;
+  border: 1px solid var(--dsw-alias-brand-primary);
+  border-radius: 7px;
+  background-color: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-brand-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s;
+
+  &:hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
   }
 }
 

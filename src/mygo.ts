@@ -11,34 +11,95 @@ export interface AppInfo {
   version: string;
 }
 
+/** BackgroundJobInfo is a UI-friendly snapshot of a background bash job. */
+export interface BackgroundJobInfo {
+  id: string;
+  sessionId: string;
+  command: string;
+  description: string;
+  workdir: string;
+  /** "running" | "completed" | "killed" */
+  status: string;
+  exitCode: number;
+  startedAt: number;
+  endedAt?: number;
+  sandboxed: boolean;
+  sandboxMode?: string;
+}
+
 export interface FileOpenResult {
   name: string;
   /** base64 */
   content: string;
 }
 
+/** FilePreview carries structured metadata and preview content for a produced file. */
+export interface FilePreview {
+  path: string;
+  name: string;
+  ext: string;
+  size: number;
+  /** "html" | "markdown" | "image" | "code" | "text" | "binary" */
+  kind: string;
+  mimeType: string;
+  content: string;
+  truncated: boolean;
+}
+
 /** MenuAction represents an action triggered from the native application menu or its shortcuts. */
 export type MenuAction = "check-update" | "open-settings" | "new-chat" | "search-chats" | "toggle-sidebar";
+
+/** SkillCatalog contains all discovered skills and a stable content digest. */
+export interface SkillCatalog {
+  skills: SkillSummary[];
+  digest: string;
+}
+
+/** SkillDocument contains the full instructions of a loaded skill. */
+export interface SkillDocument {
+  name: string;
+  description: string;
+  scope: string;
+  path: string;
+  baseDir: string;
+  content: string;
+}
+
+/** SkillSummary describes a discovered skill for progressive catalog disclosure. */
+export interface SkillSummary {
+  name: string;
+  description: string;
+  /** "project" | "user" */
+  scope: string;
+  path: string;
+  baseDir: string;
+}
 
 /** ToolClassifyResult represents the pre-execution policy decision for a tool call. */
 export interface ToolClassifyResult {
   /** "allow" | "ask" | "deny" */
   decision: string;
   reason: string;
+  /** Non-empty when UI may offer "Allow for this session" */
+  sessionAllowKey?: string;
 }
 
 /** ToolExecuteRequest is the unified RPC payload for classifying and executing a client tool. */
 export interface ToolExecuteRequest {
   sessionId: string;
-  /** read | write | edit | delete_file | glob | grep | bash */
+  /** read | write | edit | delete_file | glob | grep | bash | job_output | job_kill | skill */
   toolName: string;
   input: Record<string, unknown>;
   /** User workspace or existing scratchDir; empty triggers lazy scratch on write/edit/bash */
   workdir: string;
   /** read-only | workspace-write | full-access */
   permissionMode: string;
-  /** True only after one-time user approval; backend still re-verifies */
+  /** True only after user approval; backend still re-verifies */
   approved: boolean;
+  /** When true with Approved, remembers non-high-risk command prefix for this session */
+  allowSession?: boolean;
+  /** User-configured command blacklist for sandboxed workspace-write mode (nil uses defaults) */
+  approvalBlacklist?: string[];
 }
 
 /** ToolExecuteResult separates concise model output from rich UI metadata. */
@@ -104,6 +165,10 @@ export const WorkspaceService = {
   pickDirectory(): Promise<string> {
     return call("WorkspaceService.PickDirectory");
   },
+  /** ReadFilePreview inspects a local file and returns a bounded preview payload (HTML, Markdown, Image, Code, Text, or Binary). */
+  readFilePreview(absPath: string): Promise<FilePreview | null> {
+    return call("WorkspaceService.ReadFilePreview", absPath);
+  },
   /** RemoveScratchDir removes the isolated scratch directory (~/.vela/scratch/<sessionID>) for a session. */
   removeScratchDir(sessionID: string): Promise<void> {
     return call("WorkspaceService.RemoveScratchDir", sessionID);
@@ -111,6 +176,25 @@ export const WorkspaceService = {
   /** RevealInFinder reveals the specified path in Finder (macOS), Explorer (Windows), or the file manager (Linux). */
   revealInFinder(absPath: string): Promise<void> {
     return call("WorkspaceService.RevealInFinder", absPath);
+  },
+  /**
+   * SavePathAs opens a native Save dialog and copies the file at absPath to the user-selected destination.
+   * Returns the destination path, or an empty string if the user cancelled.
+   */
+  savePathAs(absPath: string): Promise<string> {
+    return call("WorkspaceService.SavePathAs", absPath);
+  },
+} as const;
+
+/** SkillService discovers and loads local SKILL.md files from <workspace>/.agents/skills and ~/.vela/skills. */
+export const SkillService = {
+  /** ListSkills scans project and user skill directories (one level deep) and returns metadata plus a digest. */
+  listSkills(workdir: string): Promise<SkillCatalog> {
+    return call("SkillService.ListSkills", workdir);
+  },
+  /** ReadSkill loads the full markdown body of a skill by name. */
+  readSkill(name: string, workdir: string): Promise<SkillDocument> {
+    return call("SkillService.ReadSkill", name, workdir);
   },
 } as const;
 
@@ -129,9 +213,25 @@ export const ToolService = {
   classifyToolCall(req: ToolExecuteRequest): Promise<ToolClassifyResult> {
     return call("ToolService.ClassifyToolCall", req);
   },
+  /** ClearSessionApprovals revokes all in-memory session-scoped command approvals for sessionID. */
+  clearSessionApprovals(sessionID: string): Promise<void> {
+    return call("ToolService.ClearSessionApprovals", sessionID);
+  },
   /** ExecuteTool re-verifies policy on the backend (fail-closed) and dispatches the requested tool. */
   executeTool(req: ToolExecuteRequest): Promise<ToolExecuteResult> {
     return call("ToolService.ExecuteTool", req);
+  },
+  /** GetDefaultApprovalBlacklist returns the built-in command blacklist used in sandboxed workspace-write mode. */
+  getDefaultApprovalBlacklist(): Promise<string[]> {
+    return call("ToolService.GetDefaultApprovalBlacklist");
+  },
+  /** KillBackgroundJob terminates a running background bash job by ID. */
+  killBackgroundJob(jobID: string): Promise<void> {
+    return call("ToolService.KillBackgroundJob", jobID);
+  },
+  /** ListBackgroundJobs returns all background bash jobs for a session (or all sessions if sessionID is empty). */
+  listBackgroundJobs(sessionID: string): Promise<BackgroundJobInfo[]> {
+    return call("ToolService.ListBackgroundJobs", sessionID);
   },
 } as const;
 

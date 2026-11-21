@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   IconGlobeLanguageOutline14,
   IconPaperclipOutline16,
@@ -34,8 +34,12 @@ import { DraftAttachments } from './DraftAttachments.js'
 import { useVoiceInput } from './useVoiceInput.js'
 import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
+import { refreshSkills, useSkillStore } from '../../services/skills/store.js'
+import { useWorkspaceStore } from '../../services/workspace/store.js'
+import type { SkillSummary } from '../../mygo.js'
 import { ModelPicker } from './ModelPicker.js'
 import { PermissionPicker } from './PermissionPicker.js'
+import { SlashSkillMenu } from './SlashSkillMenu.js'
 import { WorkspacePicker } from './WorkspacePicker.js'
 import {
   handleAtomicQuoteDeletion,
@@ -86,6 +90,65 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const savedRangeRef = useRef<Range | null>(null)
   const composingRef = useRef(false)
   const lastSyncedSegmentsRef = useRef<DraftSegment[] | null>(null)
+  const [slashIndex, setSlashIndex] = useState(0)
+  const [slashDismissed, setSlashDismissed] = useState(false)
+  const skills = useSkillStore((state) => state.skills)
+  const workspaces = useWorkspaceStore((state) => state.workspaces)
+  const draftWorkspaceId = useWorkspaceStore((state) => state.draftWorkspaceId)
+  const activeSession = useChatStore((state) =>
+    sessionId ? state.sessionCache[sessionId] ?? state.sessions.find((s) => s.id === sessionId) : undefined
+  )
+  const activeWorkspaceId = sessionId ? (activeSession?.workspaceId ?? null) : draftWorkspaceId
+  const activeWorkdir =
+    workspaces.find((w) => w.id === activeWorkspaceId)?.path ?? activeSession?.scratchDir ?? ''
+
+  useEffect(() => {
+    void refreshSkills(activeWorkdir)
+  }, [activeWorkdir])
+
+  const slashQuery = useMemo(() => {
+    if (segments.some((s) => s.type === 'quote')) {
+      return null
+    }
+    const raw = draft.text
+    if (!raw.startsWith('/') || /\s/.test(raw)) {
+      return null
+    }
+    return raw.slice(1).toLowerCase()
+  }, [draft.text, segments])
+
+  const matchingSkills = useMemo(() => {
+    if (slashQuery === null || slashDismissed) {
+      return []
+    }
+    if (!slashQuery) {
+      return skills
+    }
+    return skills.filter(
+      (skill) =>
+        skill.name.toLowerCase().includes(slashQuery) ||
+        skill.description.toLowerCase().includes(slashQuery)
+    )
+  }, [skills, slashQuery, slashDismissed])
+
+  useEffect(() => {
+    setSlashDismissed(false)
+    setSlashIndex(0)
+  }, [slashQuery])
+
+  const selectSlashSkill = useCallback(
+    (skill: SkillSummary) => {
+      setSlashDismissed(true)
+      setDraftText(sessionId, `/${skill.name} `)
+      requestAnimationFrame(() => {
+        if (editorRef.current) {
+          editorRef.current.focus({ preventScroll: true })
+          moveCaretToEnd(editorRef.current)
+        }
+      })
+    },
+    [sessionId]
+  )
 
   const syncFromDom = useCallback(() => {
     const editor = editorRef.current
@@ -288,6 +351,12 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         }
       }}
     >
+      <SlashSkillMenu
+        skills={matchingSkills}
+        selectedIndex={Math.min(slashIndex, Math.max(0, matchingSkills.length - 1))}
+        onSelect={selectSlashSkill}
+        onHover={setSlashIndex}
+      />
       <WorkspacePicker sessionId={sessionId} disabled={importingHistory} />
       <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
       <div className={styles.textareaWrapper}>
@@ -356,6 +425,32 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
                 event.preventDefault()
                 historyIndexRef.current = -1
                 syncFromDom()
+                return
+              }
+            }
+
+            if (matchingSkills.length > 0) {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setSlashIndex((prev) => (prev + 1) % matchingSkills.length)
+                return
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setSlashIndex((prev) => (prev - 1 + matchingSkills.length) % matchingSkills.length)
+                return
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setSlashDismissed(true)
+                return
+              }
+              if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+                event.preventDefault()
+                const chosen = matchingSkills[Math.min(slashIndex, matchingSkills.length - 1)]
+                if (chosen) {
+                  selectSlashSkill(chosen)
+                }
                 return
               }
             }

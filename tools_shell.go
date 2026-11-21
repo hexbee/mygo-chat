@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -39,47 +37,6 @@ func sanitizeEnv(environ []string) []string {
 		clean = append(clean, entry)
 	}
 	return clean
-}
-
-type boundedBuffer struct {
-	mu        sync.Mutex
-	buf       bytes.Buffer
-	limit     int
-	truncated bool
-}
-
-func newBoundedBuffer(limit int) *boundedBuffer {
-	return &boundedBuffer{limit: limit}
-}
-
-func (b *boundedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	origLen := len(p)
-	remaining := b.limit - b.buf.Len()
-	if remaining <= 0 {
-		b.truncated = true
-		return origLen, nil
-	}
-	if len(p) > remaining {
-		b.buf.Write(p[:remaining])
-		b.truncated = true
-		return origLen, nil
-	}
-	b.buf.Write(p)
-	return origLen, nil
-}
-
-func (b *boundedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-func (b *boundedBuffer) Truncated() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.truncated
 }
 
 type fileStamp struct {
@@ -140,18 +97,28 @@ func isDirEmpty(dir string) bool {
 	return len(entries) == 0
 }
 
+func truncateOutput(s string, maxBytes int) (string, bool) {
+	if len(s) <= maxBytes {
+		return s, false
+	}
+	return s[:maxBytes], true
+}
+
 // executeBash implements bash(description?, command, workdir?, timeoutMs?) with:
-//   - process-group isolation and full subtree cleanup on cancel/timeout
+//   - process-group isolation and full subtree cleanup on user cancel
+//   - lightweight OS sandbox (macOS sandbox-exec / Linux bwrap) for read-only & workspace-write
+//   - automatic promotion to a background job on timeout (with ring buffers & job_output/job_kill)
 //   - sensitive environment variable stripping
 //   - lazy scratch dir creation with post-exit empty-dir cleanup
 //   - before/after file snapshot diff for uiMeta.producedFiles
 //   - non-zero exit codes returned as normal (non-error) tool results
-func executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult, error) {
+func (s *ToolService) executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult, error) {
 	command := strings.TrimSpace(stringInput(req.Input, "command"))
 	if command == "" {
 		return toolErrorResult("Error: command is required", req.Workdir)
 	}
 
+	description := strings.TrimSpace(stringInput(req.Input, "description"))
 	timeoutMs := intInput(req.Input, "timeoutMs", bashDefaultTimeoutMs)
 	if timeoutMs <= 0 {
 		timeoutMs = bashDefaultTimeoutMs
@@ -160,6 +127,7 @@ func executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 		timeoutMs = bashMaxTimeoutMs
 	}
 
+	perm := normalizePermissionMode(req.PermissionMode)
 	inputWorkdir := strings.TrimSpace(stringInput(req.Input, "workdir"))
 	reqWorkdir := strings.TrimSpace(req.Workdir)
 
@@ -204,19 +172,22 @@ func executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 
 	beforeSnap := snapshotDirFiles(cwd)
 
-	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
-	defer cancel()
-
-	cmd := buildShellCommand(command)
+	spec := sandboxSpec{
+		mode:            perm,
+		writableRoots:   collectSandboxWritableRoots(perm, cwd, reqWorkdir),
+		deniedReadPaths: collectSensitiveReadDenyPaths(cwd, reqWorkdir),
+	}
+	cmd, sandboxed := buildSandboxedShellCommand(command, spec)
 	cmd.Dir = cwd
 	cmd.Env = sanitizeEnv(os.Environ())
 	configureProcessGroup(cmd)
 
-	stdoutBuf := newBoundedBuffer(bashMaxOutputBytes)
-	stderrBuf := newBoundedBuffer(bashMaxOutputBytes)
+	stdoutBuf := newRingBuffer(jobRingBufferBytes)
+	stderrBuf := newRingBuffer(jobRingBufferBytes)
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
 
+	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
 		if createdScratchNow && isDirEmpty(cwd) {
 			_ = os.Remove(cwd)
@@ -224,21 +195,134 @@ func executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 		return toolErrorResult(fmt.Sprintf("Error starting command: %v", err), reqWorkdir)
 	}
 
-	doneCh := make(chan struct{})
+	waitCh := make(chan error, 1)
 	go func() {
-		select {
-		case <-runCtx.Done():
-			killProcessTree(cmd)
-		case <-doneCh:
-		}
+		waitCh <- cmd.Wait()
 	}()
 
-	waitErr := cmd.Wait()
-	close(doneCh)
+	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
+	defer timer.Stop()
 
-	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded)
-	canceled := errors.Is(ctx.Err(), context.Canceled)
+	select {
+	case waitErr := <-waitCh:
+		return finishForegroundBash(
+			waitErr,
+			false,
+			cwd,
+			createdScratchNow,
+			beforeSnap,
+			stdoutBuf,
+			stderrBuf,
+			sandboxed,
+			perm,
+		), nil
 
+	case <-ctx.Done():
+		killProcessTree(cmd)
+		waitErr := <-waitCh
+		return finishForegroundBash(
+			waitErr,
+			true,
+			cwd,
+			createdScratchNow,
+			beforeSnap,
+			stdoutBuf,
+			stderrBuf,
+			sandboxed,
+			perm,
+		), nil
+
+	case <-timer.C:
+		// Promote long-running command to a background job instead of killing it.
+		job := &backgroundJob{
+			sessionID:         req.SessionID,
+			command:           command,
+			description:       description,
+			workdir:           cwd,
+			startedAt:         startedAt,
+			cmd:               cmd,
+			stdout:            stdoutBuf,
+			stderr:            stderrBuf,
+			done:              make(chan struct{}),
+			sandboxed:         sandboxed,
+			sandboxMode:       perm,
+			createdScratchNow: createdScratchNow,
+			beforeSnap:        beforeSnap,
+			status:            jobStatusRunning,
+		}
+		jobID := s.registerBackgroundJob(job)
+
+		go func() {
+			waitErr := <-waitCh
+			job.finish(waitErr)
+		}()
+
+		stdoutRaw, stderrRaw, dropped := job.consumeDelta()
+		stdoutStr, outTrunc := truncateOutput(strings.TrimRight(stdoutRaw, "\r\n"), bashMaxOutputBytes)
+		stderrStr, errTrunc := truncateOutput(strings.TrimRight(stderrRaw, "\r\n"), bashMaxOutputBytes)
+		truncated := dropped || outTrunc || errTrunc
+
+		var out strings.Builder
+		if stdoutStr != "" {
+			out.WriteString(stdoutStr)
+		}
+		if stderrStr != "" {
+			if out.Len() > 0 {
+				out.WriteString("\n")
+			}
+			out.WriteString("[stderr]\n")
+			out.WriteString(stderrStr)
+		}
+		if truncated {
+			if out.Len() > 0 {
+				out.WriteString("\n")
+			}
+			out.WriteString(fmt.Sprintf("[truncated: output exceeded %d KB limit]", bashMaxOutputBytes/1024))
+		}
+		if out.Len() > 0 {
+			out.WriteString("\n")
+		}
+		out.WriteString(fmt.Sprintf(
+			"[command still running after %dms; moved to background job: %s. Use job_output(job_id=%q) to inspect output or job_kill(job_id=%q) to terminate it.]",
+			timeoutMs, jobID, jobID, jobID,
+		))
+
+		assignedScratch := ""
+		if createdScratchNow {
+			assignedScratch = cwd
+		}
+
+		meta := map[string]any{
+			"backgroundJobId": jobID,
+			"jobStatus":       jobStatusRunning,
+			"truncated":       truncated,
+			"workdir":         cwd,
+			"sandboxed":       sandboxed,
+		}
+		if sandboxed {
+			meta["sandboxMode"] = perm
+		}
+
+		return ToolExecuteResult{
+			ModelContent:    out.String(),
+			IsError:         false,
+			AssignedScratch: assignedScratch,
+			UIMeta:          meta,
+		}, nil
+	}
+}
+
+func finishForegroundBash(
+	waitErr error,
+	canceled bool,
+	cwd string,
+	createdScratchNow bool,
+	beforeSnap map[string]fileStamp,
+	stdoutBuf *ringBuffer,
+	stderrBuf *ringBuffer,
+	sandboxed bool,
+	perm string,
+) ToolExecuteResult {
 	exitCode := 0
 	if waitErr != nil {
 		var exitErr *exec.ExitError
@@ -265,9 +349,11 @@ func executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 		producedFiles = diffSnapshots(cwd, beforeSnap, afterSnap)
 	}
 
-	stdoutStr := strings.TrimRight(stdoutBuf.String(), "\r\n")
-	stderrStr := strings.TrimRight(stderrBuf.String(), "\r\n")
-	truncated := stdoutBuf.Truncated() || stderrBuf.Truncated()
+	stdoutRaw, _, outDropped := stdoutBuf.readFrom(0)
+	stderrRaw, _, errDropped := stderrBuf.readFrom(0)
+	stdoutStr, outTrunc := truncateOutput(strings.TrimRight(stdoutRaw, "\r\n"), bashMaxOutputBytes)
+	stderrStr, errTrunc := truncateOutput(strings.TrimRight(stderrRaw, "\r\n"), bashMaxOutputBytes)
+	truncated := outDropped || errDropped || outTrunc || errTrunc
 
 	var out strings.Builder
 	if stdoutStr != "" {
@@ -286,12 +372,7 @@ func executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 		}
 		out.WriteString(fmt.Sprintf("[truncated: output exceeded %d KB limit]", bashMaxOutputBytes/1024))
 	}
-	if timedOut {
-		if out.Len() > 0 {
-			out.WriteString("\n")
-		}
-		out.WriteString(fmt.Sprintf("[timed out after %dms]", timeoutMs))
-	} else if canceled {
+	if canceled {
 		if out.Len() > 0 {
 			out.WriteString("\n")
 		}
@@ -303,6 +384,12 @@ func executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 		}
 		out.WriteString(fmt.Sprintf("[exit code: %d]", exitCode))
 	}
+	if sandboxed && !canceled && exitCode != 0 && looksLikeSandboxDenial(stderrStr) {
+		if out.Len() > 0 {
+			out.WriteString("\n")
+		}
+		out.WriteString(fmt.Sprintf("[sandbox: kernel blocked a write outside allowed roots under %s mode]", perm))
+	}
 	if out.Len() == 0 {
 		out.WriteString("(no output)")
 	}
@@ -310,6 +397,10 @@ func executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 	meta := map[string]any{
 		"exitCode":  exitCode,
 		"truncated": truncated,
+		"sandboxed": sandboxed,
+	}
+	if sandboxed {
+		meta["sandboxMode"] = perm
 	}
 	if effectiveWorkdir != "" {
 		meta["workdir"] = effectiveWorkdir
@@ -323,5 +414,5 @@ func executeBash(ctx context.Context, req ToolExecuteRequest) (ToolExecuteResult
 		IsError:         canceled,
 		AssignedScratch: assignedScratch,
 		UIMeta:          meta,
-	}, nil
+	}
 }

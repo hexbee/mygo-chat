@@ -33,6 +33,7 @@ import { Modal } from '../base/Modal.js'
 import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
 import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
+import { CommandBlacklistSetting } from './CommandBlacklistSetting.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import { nativeOpenFile, nativeSaveFile } from '../../services/desktop/dialog.js'
 import { AppService } from '../../mygo.js'
@@ -40,7 +41,7 @@ import { useUpdateStore } from '../../services/updater/updateStore.js'
 import styles from './Settings.module.css'
 
 /**
- * 设置弹窗：分「通用设置」（主题、语言、朗读音色、位置）与「数据管理」（API Key、导入、导出、删除）。
+ * 设置弹窗：分「通用设置」（主题、语言、朗读音色、位置）、「安全与审批」（命令审批黑名单）与「数据管理」（API Key、导入、导出、删除）。
  * 桌面端为居中弹窗、左侧导航；移动端为底部弹层、导航横排在内容上方
  */
 export const SettingsDialog = () => {
@@ -53,6 +54,20 @@ const sections: { value: SettingsSection; label: TranslationKey; icon: ReactNode
     value: 'general',
     label: 'settingDialogAsideGeneralOptionLabel',
     icon: <IconSettingsOutline16 />,
+  },
+  {
+    value: 'security',
+    label: 'settingDialogAsideSecurityOptionLabel',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path
+          d="M8 1.75L2.75 3.75V7.75C2.75 11.05 4.98 13.87 8 14.75C11.02 13.87 13.25 11.05 13.25 7.75V3.75L8 1.75Z"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
   },
   { value: 'data', label: 'settingDialogAsideDataOptionLabel', icon: <IconDataOutline16 /> },
 ]
@@ -105,6 +120,8 @@ const SettingsContent = () => {
               <LocationSetting />
               <UpdateSetting />
             </>
+          ) : section === 'security' ? (
+            <CommandBlacklistSetting />
           ) : (
             <>
               <ApiKeyField editor={apiKeyEditor} />

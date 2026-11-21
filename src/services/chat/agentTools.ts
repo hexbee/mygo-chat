@@ -1,5 +1,6 @@
 import { ToolService, type ToolExecuteRequest } from '../../mygo.js'
 import type { ClientToolDefinition } from '../api/types.js'
+import { useSettings } from '../settings.js'
 import type { PermissionMode } from '../workspace/types.js'
 import type {
   ClientToolResultPart,
@@ -8,10 +9,10 @@ import type {
   ToolUIMeta,
 } from './types.js'
 
-const READ_ONLY_TOOLS = new Set(['read', 'glob', 'grep'])
+const READ_ONLY_TOOLS = new Set(['read', 'glob', 'grep', 'job_output', 'skill'])
 const READ_CONCURRENCY_LIMIT = 4
 
-/** Phase 1 暴露给 DeepSeek API 的内置文件工具与命令执行工具定义 */
+/** 暴露给 DeepSeek API 的内置文件、命令执行、后台任务与 Skills 工具定义 */
 export const CLIENT_FILE_TOOLS: ClientToolDefinition[] = [
   {
     name: 'read',
@@ -142,7 +143,7 @@ export const CLIENT_FILE_TOOLS: ClientToolDefinition[] = [
   {
     name: 'bash',
     description:
-      'Execute a shell command (bash on macOS/Linux, PowerShell on Windows) in the active workspace or isolated temporary directory. Strict read-only commands run automatically; write/build/test commands require one-time user approval. Non-zero exit codes are returned as normal output with [exit code: N]. Prefer delete_file over rm.',
+      'Execute a shell command (bash on macOS/Linux, PowerShell on Windows) in the active workspace or isolated temporary directory. Strict read-only commands run automatically; write/build/test commands require one-time user approval. Non-zero exit codes are returned as normal output with [exit code: N]. Commands running past timeoutMs are automatically moved to a background job so you can inspect them with job_output or stop them with job_kill. Prefer delete_file over rm.',
     input_schema: {
       type: 'object',
       properties: {
@@ -166,50 +167,106 @@ export const CLIENT_FILE_TOOLS: ClientToolDefinition[] = [
       required: ['command'],
     },
   },
+  {
+    name: 'job_output',
+    description:
+      'Read new stdout/stderr output and current status (running/completed/killed) from a background bash job created when a command exceeded timeoutMs.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        job_id: {
+          type: 'string',
+          description: 'Background job ID returned by bash (e.g. "job-1").',
+        },
+        wait_ms: {
+          type: 'integer',
+          description: 'Optional milliseconds to wait for new output or completion (default 0, max 30000).',
+        },
+      },
+      required: ['job_id'],
+    },
+  },
+  {
+    name: 'job_kill',
+    description: 'Terminate a running background bash job and its process group.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        job_id: {
+          type: 'string',
+          description: 'Background job ID to terminate (e.g. "job-1").',
+        },
+      },
+      required: ['job_id'],
+    },
+  },
+  {
+    name: 'skill',
+    description:
+      'Load the full instructions of a local SKILL.md listed in the skills-catalog <system-reminder>. Call this on demand when a task matches an available skill.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Exact name of the skill to load.',
+        },
+      },
+      required: ['name'],
+    },
+  },
 ]
 
 export type AgentWorkspaceContext = {
   workspacePath: string | null
   scratchDir: string | null
   permissionMode: PermissionMode
+  skillsReminder?: string
+  invokedSkillReminder?: string
 }
 
-/** 组装包含工作区状态与权限边界的系统提示，避免普通闲聊误触磁盘探测 */
+/** 组装包含工作区状态、权限边界与 Skills 渐进式摘要的系统提示，避免普通闲聊误触磁盘探测 */
 export const buildAgentSystemPrompt = (
   basePrompt: string,
   ctx: AgentWorkspaceContext
 ): string => {
   const permissionNote =
     ctx.permissionMode === 'read-only'
-      ? '当前权限档位：仅可查看（read-only），仅允许 read/glob/grep 与严格只读命令，禁止写入、修改、删除或执行写命令。'
+      ? '当前权限档位：仅可查看（read-only），仅允许 read/glob/grep 与严格只读命令（OS 沙箱禁止写盘），禁止写入、修改、删除或执行写命令。'
       : ctx.permissionMode === 'full-access'
         ? '当前权限档位：完全权限（full-access），允许跨目录读写文件与执行常规命令（高危删除或提权命令仍需一次性确认）。'
-        : '当前权限档位：工作区内修改（workspace-write），允许在当前工作区或会话临时目录内读写编辑文件以及执行严格只读命令；非只读命令或越界路径会请求用户一次性审批。'
+        : '当前权限档位：工作区内修改（workspace-write），允许在当前工作区或会话临时目录内读写编辑文件以及执行严格只读命令；非只读命令或越界路径会请求用户一次性审批，且命令受轻量 OS 沙箱限制工作区外写入。'
+
+  const parts: string[] = [basePrompt]
 
   if (ctx.workspacePath) {
-    return [
-      basePrompt,
+    parts.push(
       `当前已挂载本地工作区：${ctx.workspacePath}。`,
       permissionNote,
-      '你可以使用内置工具（read、write、edit、delete_file、glob、grep、bash）查看代码、修改文件与运行命令；优先使用相对路径，删除文件优先使用 delete_file 而非 rm。',
-    ].join('\n')
-  }
-
-  if (ctx.scratchDir) {
-    return [
-      basePrompt,
+      '你可以使用内置工具（read、write、edit、delete_file、glob、grep、bash、job_output、job_kill、skill）查看代码、修改文件与运行命令；优先使用相对路径，删除文件优先使用 delete_file 而非 rm。'
+    )
+  } else if (ctx.scratchDir) {
+    parts.push(
       `当前为无项目目录的临时会话，已自动分配隔离临时目录：${ctx.scratchDir}。`,
       permissionNote,
-      '常规问答请直接回答，无需探测磁盘；仅当用户需要生成文件、可运行 Demo 或执行脚本验证时再调用工具（优先使用相对路径，删除文件优先使用 delete_file）。',
-    ].join('\n')
+      '常规问答请直接回答，无需探测磁盘；仅当用户需要生成文件、可运行 Demo 或执行脚本验证时再调用工具（优先使用相对路径，删除文件优先使用 delete_file）。'
+    )
+  } else {
+    parts.push(
+      '当前为无项目目录的临时会话；常规问答直接回答，无需探测磁盘。',
+      permissionNote,
+      '仅当用户需要生成文件、可运行 Demo（如 HTML 小游戏、脚本、文档）或执行命令验证时再调用工具；使用 write 写入相对路径（如 index.html）时，系统会自动创建会话专属临时目录。'
+    )
   }
 
-  return [
-    basePrompt,
-    '当前为无项目目录的临时会话；常规问答直接回答，无需探测磁盘。',
-    permissionNote,
-    '仅当用户需要生成文件、可运行 Demo（如 HTML 小游戏、脚本、文档）或执行命令验证时再调用工具；使用 write 写入相对路径（如 index.html）时，系统会自动创建会话专属临时目录。',
-  ].join('\n')
+  if (ctx.skillsReminder) {
+    parts.push(ctx.skillsReminder)
+  }
+  if (ctx.invokedSkillReminder) {
+    parts.push(ctx.invokedSkillReminder)
+  }
+
+  return parts.join('\n')
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -228,6 +285,27 @@ const parseToolUIMeta = (raw?: Record<string, unknown>): ToolUIMeta | undefined 
   }
   if (typeof raw.exitCode === 'number' || raw.exitCode === null) {
     meta.exitCode = raw.exitCode
+  }
+  if (typeof raw.backgroundJobId === 'string' && raw.backgroundJobId) {
+    meta.backgroundJobId = raw.backgroundJobId
+  }
+  if (raw.jobStatus === 'running' || raw.jobStatus === 'completed' || raw.jobStatus === 'killed') {
+    meta.jobStatus = raw.jobStatus
+  }
+  if (typeof raw.sandboxed === 'boolean') {
+    meta.sandboxed = raw.sandboxed
+  }
+  if (typeof raw.sandboxMode === 'string' && raw.sandboxMode) {
+    meta.sandboxMode = raw.sandboxMode
+  }
+  if (typeof raw.skillName === 'string' && raw.skillName) {
+    meta.skillName = raw.skillName
+  }
+  if (typeof raw.skillScope === 'string' && raw.skillScope) {
+    meta.skillScope = raw.skillScope
+  }
+  if (typeof raw.skillPath === 'string' && raw.skillPath) {
+    meta.skillPath = raw.skillPath
   }
   if (Array.isArray(raw.producedFiles)) {
     const files = raw.producedFiles.filter((item): item is string => typeof item === 'string')
@@ -254,13 +332,23 @@ const parseToolUIMeta = (raw?: Record<string, unknown>): ToolUIMeta | undefined 
   return Object.keys(meta).length > 0 ? meta : undefined
 }
 
+export type ApprovalDecision = {
+  approved: boolean
+  allowSession?: boolean
+}
+
 export type ToolExecutionContext = {
   sessionId: string
   getWorkdir: () => string
   permissionMode: PermissionMode
   signal: AbortSignal
   onAssignedScratch: (scratchDir: string) => void
-  requestApproval?: (call: ClientToolUsePart, reason: string, workdir: string) => Promise<boolean>
+  requestApproval?: (
+    call: ClientToolUsePart,
+    reason: string,
+    workdir: string,
+    sessionAllowKey?: string
+  ) => Promise<ApprovalDecision>
   onResult?: (result: ClientToolResultPart) => void
 }
 
@@ -296,6 +384,7 @@ const runSingleTool = async (
     workdir,
     permissionMode: ctx.permissionMode,
     approved: false,
+    approvalBlacklist: useSettings.getState().approvalBlacklist,
   }
 
   try {
@@ -325,9 +414,14 @@ const runSingleTool = async (
 
     let approvedOnce = false
     if (classification.decision === 'ask') {
-      const approved = ctx.requestApproval
-        ? await ctx.requestApproval(call, classification.reason, workdir)
-        : false
+      const decision = ctx.requestApproval
+        ? await ctx.requestApproval(
+            call,
+            classification.reason,
+            workdir,
+            classification.sessionAllowKey
+          )
+        : { approved: false }
       if (ctx.signal.aborted) {
         return {
           type: 'client_tool_result',
@@ -341,7 +435,7 @@ const runSingleTool = async (
           },
         }
       }
-      if (!approved) {
+      if (!decision.approved) {
         return {
           type: 'client_tool_result',
           tool_use_id: call.id,
@@ -356,6 +450,9 @@ const runSingleTool = async (
       }
       approvedOnce = true
       req.approved = true
+      if (decision.allowSession) {
+        req.allowSession = true
+      }
     }
 
     const res = await ToolService.executeTool(req)

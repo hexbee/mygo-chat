@@ -231,6 +231,7 @@ func main() {
 	mygo.Bind(AppService{})
 	mygo.Bind(FileService{})
 	mygo.Bind(WorkspaceService{})
+	mygo.Bind(SkillService{})
 	mygo.Bind(globalToolService)
 	mygo.Bind(globalUpdateService)
 

@@ -9,7 +9,53 @@ export type Locale = 'zh-CN' | 'en-US'
 /** 主题偏好；默认跟随系统 */
 export type ThemePreference = 'light' | 'dark' | 'system'
 
-/** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、模型、推理等级、权限默认值、深度思考与智能搜索开关、侧边栏收起状态 */
+/** 沙箱生效时（工作区内修改模式）默认需要人工审批的命令黑名单 */
+export const DEFAULT_APPROVAL_BLACKLIST: readonly string[] = [
+  'rm',
+  'rmdir',
+  'sudo',
+  'su',
+  'mkfs',
+  'dd',
+  'chmod',
+  'chown',
+  'shutdown',
+  'reboot',
+  'halt',
+  'kill',
+  'killall',
+  'pkill',
+  'diskutil',
+  'format',
+  'git reset',
+  'git clean',
+  'git checkout',
+  'git restore',
+  'git rebase',
+  'git merge',
+  'git push',
+  'curl',
+  'wget',
+  'ssh',
+  'scp',
+  'rsync',
+  'nc',
+  'netcat',
+  'telnet',
+  'ftp',
+  'sftp',
+  'gh',
+  'aws',
+  'gcloud',
+  'az',
+  'twine',
+  'npm publish',
+  'pnpm publish',
+  'yarn publish',
+  'cargo publish',
+]
+
+/** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、模型、推理等级、权限默认值、审批黑名单、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
   apiKey: string | null
   locale: Locale
@@ -19,6 +65,7 @@ type Settings = {
   model: ChatModel
   reasoningEffort: ReasoningEffort
   defaultPermissionMode: PermissionMode
+  approvalBlacklist: string[]
   thinking: boolean
   search: boolean
   siderCollapsed: boolean
@@ -33,6 +80,7 @@ const KEYS = {
   model: 'chat-demo:model',
   reasoningEffort: 'chat-demo:reasoning-effort',
   permissionMode: 'chat-demo:permission-mode',
+  approvalBlacklist: 'chat-demo:approval-blacklist',
   thinking: 'chat-demo:thinking',
   search: 'chat-demo:search',
   siderCollapsed: 'chat-demo:sider-collapsed',
@@ -117,6 +165,39 @@ const initialPermissionMode = (): PermissionMode => {
   return 'workspace-write'
 }
 
+const normalizeBlacklist = (items: readonly string[]): string[] => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of items) {
+    const cleaned = item.trim().replace(/\s+/g, ' ')
+    if (!cleaned) {
+      continue
+    }
+    const key = cleaned.toLowerCase()
+    if (!seen.has(key)) {
+      seen.add(key)
+      out.push(cleaned)
+    }
+  }
+  return out
+}
+
+const initialApprovalBlacklist = (): string[] => {
+  const raw = read(KEYS.approvalBlacklist)
+  if (raw === null) {
+    return [...DEFAULT_APPROVAL_BLACKLIST]
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (Array.isArray(parsed)) {
+      return normalizeBlacklist(parsed.filter((item): item is string => typeof item === 'string'))
+    }
+  } catch {
+    // fall back to defaults
+  }
+  return [...DEFAULT_APPROVAL_BLACKLIST]
+}
+
 const bootReasoningEffort = initialReasoningEffort()
 
 export const useSettings = create<Settings>(() => ({
@@ -128,6 +209,7 @@ export const useSettings = create<Settings>(() => ({
   model: initialModel(),
   reasoningEffort: bootReasoningEffort,
   defaultPermissionMode: initialPermissionMode(),
+  approvalBlacklist: initialApprovalBlacklist(),
   thinking: bootReasoningEffort !== 'off',
   search: read(KEYS.search) === 'true',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
@@ -174,6 +256,17 @@ export const setReasoningEffort = (reasoningEffort: ReasoningEffort) => {
 export const setDefaultPermissionMode = (defaultPermissionMode: PermissionMode) => {
   write(KEYS.permissionMode, defaultPermissionMode)
   useSettings.setState({ defaultPermissionMode })
+}
+
+export const setApprovalBlacklist = (rules: readonly string[]) => {
+  const normalized = normalizeBlacklist(rules)
+  write(KEYS.approvalBlacklist, JSON.stringify(normalized))
+  useSettings.setState({ approvalBlacklist: normalized })
+}
+
+export const resetApprovalBlacklist = () => {
+  write(KEYS.approvalBlacklist, null)
+  useSettings.setState({ approvalBlacklist: [...DEFAULT_APPROVAL_BLACKLIST] })
 }
 
 export const setThinking = (thinking: boolean) => {

@@ -246,3 +246,11 @@ export const openWorkspacePath = async (absPath: string): Promise<void> => {
 export const revealWorkspaceInFinder = async (absPath: string): Promise<void> => {
   await WorkspaceService.revealInFinder(absPath)
 }
+
+export const saveWorkspacePathAs = async (absPath: string): Promise<string> => {
+  return WorkspaceService.savePathAs(absPath)
+}
+
+export const readWorkspaceFilePreview = async (absPath: string) => {
+  return WorkspaceService.readFilePreview(absPath)
+}

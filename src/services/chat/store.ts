@@ -14,10 +14,16 @@ import {
 } from '../workspace/store.js'
 import type { PermissionMode } from '../workspace/types.js'
 import {
+  buildSkillCatalogReminder,
+  refreshSkills,
+  resolveExplicitSkillReminder,
+} from '../skills/store.js'
+import {
   buildAgentSystemPrompt,
   CLIENT_FILE_TOOLS,
   executeClientToolCalls,
   type AgentWorkspaceContext,
+  type ApprovalDecision,
 } from './agentTools.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
@@ -84,6 +90,7 @@ export type PendingApproval = {
   input: Record<string, unknown>
   workdir: string
   reason: string
+  sessionAllowKey?: string
 }
 
 type ChatState = {
@@ -100,7 +107,7 @@ type ChatState = {
   activeId: string | null
   /** 正在生成回复的会话 */
   streaming: Record<string, AbortController>
-  /** 等待用户一次性审批的工具调用，按 toolUseId 索引 */
+  /** 等待用户审批的工具调用，按 toolUseId 索引 */
   pendingApprovals: Record<string, PendingApproval>
 }
 
@@ -117,9 +124,9 @@ export const useChatStore = create<ChatState>(() => ({
   pendingApprovals: {},
 }))
 
-const approvalResolvers = new Map<string, (approved: boolean) => void>()
+const approvalResolvers = new Map<string, (decision: ApprovalDecision) => void>()
 
-const settleApproval = (toolUseId: string, approved: boolean) => {
+const settleApproval = (toolUseId: string, decision: ApprovalDecision) => {
   const resolve = approvalResolvers.get(toolUseId)
   approvalResolvers.delete(toolUseId)
   set((state) => {
@@ -132,16 +139,18 @@ const settleApproval = (toolUseId: string, approved: boolean) => {
       ),
     }
   })
-  resolve?.(approved)
+  resolve?.(decision)
 }
 
-export const approveToolCall = (toolUseId: string) => settleApproval(toolUseId, true)
-export const rejectToolCall = (toolUseId: string) => settleApproval(toolUseId, false)
+export const approveToolCall = (toolUseId: string, allowSession = false) =>
+  settleApproval(toolUseId, { approved: true, allowSession })
+export const rejectToolCall = (toolUseId: string) =>
+  settleApproval(toolUseId, { approved: false })
 
 const rejectSessionApprovals = (sessionId: string) => {
   const pending = Object.values(get().pendingApprovals).filter((item) => item.sessionId === sessionId)
   for (const item of pending) {
-    settleApproval(item.toolUseId, false)
+    settleApproval(item.toolUseId, { approved: false })
   }
 }
 
@@ -151,16 +160,17 @@ const waitForApproval = (
   call: ClientToolUsePart,
   reason: string,
   workdir: string,
+  sessionAllowKey: string | undefined,
   signal: AbortSignal
-): Promise<boolean> => {
+): Promise<ApprovalDecision> => {
   if (signal.aborted) {
-    return Promise.resolve(false)
+    return Promise.resolve({ approved: false })
   }
-  return new Promise<boolean>((resolve) => {
-    const onAbort = () => settleApproval(call.id, false)
-    approvalResolvers.set(call.id, (approved) => {
+  return new Promise<ApprovalDecision>((resolve) => {
+    const onAbort = () => settleApproval(call.id, { approved: false })
+    approvalResolvers.set(call.id, (decision) => {
       signal.removeEventListener('abort', onAbort)
-      resolve(approved)
+      resolve(decision)
     })
     signal.addEventListener('abort', onAbort, { once: true })
     set((state) => ({
@@ -174,6 +184,7 @@ const waitForApproval = (
           input: call.input,
           workdir,
           reason,
+          ...(sessionAllowKey ? { sessionAllowKey } : {}),
         },
       },
     }))
@@ -567,6 +578,7 @@ export const setSessionWorkspace = (sessionId: string | null, workspaceId: strin
   if (deletingSessions.has(sessionId)) {
     return
   }
+  void ToolService.clearSessionApprovals(sessionId).catch(() => {})
   if (getSession(sessionId)) {
     updateSession(sessionId, (session) =>
       session.workspaceId === workspaceId ? session : { ...session, workspaceId }
@@ -599,6 +611,7 @@ export const setSessionPermissionMode = (sessionId: string | null, permissionMod
   if (deletingSessions.has(sessionId)) {
     return
   }
+  void ToolService.clearSessionApprovals(sessionId).catch(() => {})
   if (getSession(sessionId)) {
     updateSession(sessionId, (session) =>
       session.permissionMode === permissionMode ? session : { ...session, permissionMode }
@@ -697,6 +710,7 @@ const removeSessionData = async (
       return false
     }
     await db.deleteSession(id)
+    void ToolService.clearSessionApprovals(id).catch(() => {})
     if (hasScratch && options?.removeScratchDir) {
       await WorkspaceService.removeScratchDir(id).catch(() => {})
     }
@@ -1220,6 +1234,12 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         const effort: ReasoningEffort =
           initial.reasoningEffort ?? (initial.thinking ? 'high' : 'off')
         const thinkingEnabled = effort !== 'off'
+        const initialWorkdir = getSessionWorkdir(sessionId)
+        const [skillCatalog, invokedSkillReminder] = await Promise.all([
+          refreshSkills(initialWorkdir),
+          resolveExplicitSkillReminder(prepared.question.content, initialWorkdir),
+        ])
+        const skillsReminder = buildSkillCatalogReminder(skillCatalog)
 
         for (let step = 0; step < MAX_AGENT_STEPS; step += 1) {
           const messages = toRequestMessages(
@@ -1230,7 +1250,11 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
             latestReminder,
             step > 0 ? reply : undefined
           )
-          const agentCtx = getSessionAgentContext(sessionId)
+          const agentCtx: AgentWorkspaceContext = {
+            ...getSessionAgentContext(sessionId),
+            skillsReminder,
+            invokedSkillReminder,
+          }
           const events = streamMessage(
             useSettings.getState().apiKey ?? '',
             {
@@ -1285,8 +1309,16 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
               getWorkdir: () => getSessionWorkdir(sessionId),
               permissionMode: getSessionAgentContext(sessionId).permissionMode,
               signal: controller.signal,
-              requestApproval: (call, reason, workdir) =>
-                waitForApproval(sessionId, reply.id, call, reason, workdir, controller.signal),
+              requestApproval: (call, reason, workdir, sessionAllowKey) =>
+                waitForApproval(
+                  sessionId,
+                  reply.id,
+                  call,
+                  reason,
+                  workdir,
+                  sessionAllowKey,
+                  controller.signal
+                ),
               onAssignedScratch: (scratchDir) => {
                 updateSession(sessionId, (session) =>
                   session.scratchDir === scratchDir ? session : { ...session, scratchDir }
